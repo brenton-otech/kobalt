@@ -1511,6 +1511,13 @@ void LibraryView::showMoreSheet()
                                  strings::get("library.resource_folders"),
                                  "libraryMoreResourceFolders", ui::ControlIcon::Folders,
                                  [this] { showResourceFolders(); }, true));
+        if (exitApp)
+            items.append(ui::actionItem(
+                    strings::get("reader.exit"), "libraryMoreExit", ui::ControlIcon::Close,
+                    [this] {
+                        if (exitApp)
+                            QTimer::singleShot(0, this, exitApp);
+                    }));
         moreSheet = new ui::ActionMenu(this, {}, items);
         moreSheet->setObjectName("libraryMoreSheet");
         moreSheet->dismissed = [this] { closeOverlay(); };

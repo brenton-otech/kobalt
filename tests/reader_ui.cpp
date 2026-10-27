@@ -1752,10 +1752,11 @@ private slots:
         view.resize(ui::px(1072), ui::px(1448));
         view.setDark(dark);
         view.show();
-        int added = 0, opened = 0, rescanned = 0;
+        int added = 0, opened = 0, rescanned = 0, exited = 0;
         view.addFolder = [&] { ++added; };
         view.openFile = [&] { ++opened; };
         view.rescan = [&] { ++rescanned; };
+        view.exitApp = [&] { ++exited; };
         const QColor ink = dark ? Qt::white : Qt::black;
         const QColor paper = dark ? Qt::black : Qt::white;
         const auto checkButton = [&](const char *name, bool primary) {
@@ -1824,7 +1825,8 @@ private slots:
         QVERIFY(view.grab().toImage().copy(backdrop) != libraryImage.copy(backdrop));
         for (const auto &item : { qMakePair("libraryMoreAddFolder", ui::ControlIcon::FolderPlus),
                                   qMakePair("libraryMoreOpenBook", ui::ControlIcon::Dictionary),
-                                  qMakePair("libraryMoreFolders", ui::ControlIcon::Folders) }) {
+                                  qMakePair("libraryMoreFolders", ui::ControlIcon::Folders),
+                                  qMakePair("libraryMoreExit", ui::ControlIcon::Close) }) {
             auto *row = menu->action(item.first);
             QVERIFY(row && row->isVisible());
             const int side = ui::metrics::control::iconSize;
@@ -1872,6 +1874,11 @@ private slots:
         checkButton("libraryFoldersRescan", false);
         QTRY_COMPARE(added, 2);
         QCOMPARE(rescanned, 1);
+        QCOMPARE(exited, 0);
+        view.findChild<QPushButton *>("libraryMore")->click();
+        view.findChild<QPushButton *>("libraryMoreExit")->click();
+        QVERIFY(!menu->isVisible());
+        QTRY_COMPARE(exited, 1);
     }
 
     // About opens without a book, keeps its metadata and controls reachable, and unwinds nested Back actions.
