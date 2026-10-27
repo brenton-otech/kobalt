@@ -784,6 +784,26 @@ void Reader::updateGraph()
                               session->pages());
 }
 
+void Reader::refreshStatus()
+{
+    if (closing || lifecycleHidden || !isVisible() || services.suspended())
+        return;
+    if (topControls->isVisible()) {
+        updateMenuStatus();
+        return;
+    }
+    if (!chromeTicks() || general->isVisible() || dictionaryPanel->isVisible()
+        || searchPanel->isVisible() || linksActive())
+        return;
+    const auto before = page->slotContents;
+    showChapterText();
+    if (page->slotContents == before)
+        return;
+    // A clock tick changes the strips, not the book page. Keep its damage
+    // out of the page-turn image and colour refresh policy.
+    page->refreshContent();
+}
+
 void Reader::updateMenuStatus()
 {
     const auto time = services.clock();
