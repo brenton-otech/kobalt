@@ -22,3 +22,4 @@ This document describes what Kobalt does on a device today: which builds exist, 
 | [Progress sync](reader/sync.md) | KOSync accounts and sync |
 | [Library](reader/library.md) | The standalone Library |
 | [Android standalone reader](reader/android.md) | Android behavior without Nickel |
+| [Kindle prototype](../building.md#kindle-prototype) | Kindle PW3 and PW5 builds, installation and supervised device checks |
