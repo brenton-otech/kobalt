@@ -756,15 +756,27 @@ bool Reader::eventFilter(QObject *watched, QEvent *event) {
         type == QEvent::TouchBegin || type == QEvent::MouseButtonPress || type == QEvent::MouseButtonDblClick;
     if (begin) {
         dismissing = false;
-        if (isVisible() && lightPopup->isVisible()) {
-            QPointF point;
+        // Only a press on a widget of this window decides a dismissal. A reader
+        // shown in a canvas, as on the Mac and Android, also sees the canvas's
+        // own press. Its screen position does not match the embedded widgets'
+        // mapToGlobal(), so it would close a pop-up that was pressed. The
+        // position is mapped through the pressed widget for the same reason.
+        auto *target = qobject_cast<QWidget *>(watched);
+        const bool inWindow = target && (target == this || isAncestorOf(target));
+        const auto pressPoint = [&](QPointF &point) {
             if (touch) {
-                const auto points = kobalt::ui::touchPositions(static_cast<QTouchEvent *>(event), true);
+                const auto points = kobalt::ui::touchPositions(static_cast<QTouchEvent *>(event));
                 if (points.isEmpty())
-                    return QWidget::eventFilter(watched, event);
-                point = points.first();
+                    return false;
+                point = target->mapToGlobal(points.first().toPoint());
             } else
-                point = kobalt::ui::mousePosition(static_cast<QMouseEvent *>(event), true);
+                point = target->mapToGlobal(kobalt::ui::mousePosition(static_cast<QMouseEvent *>(event)).toPoint());
+            return true;
+        };
+        if (inWindow && isVisible() && lightPopup->isVisible()) {
+            QPointF point;
+            if (!pressPoint(point))
+                return QWidget::eventFilter(watched, event);
             const QRect panelRect(lightPopup->mapToGlobal(QPoint()), lightPopup->size());
             const QRect toolbarRect(topControls->mapToGlobal(QPoint()), topControls->size());
             if (!panelRect.contains(point.toPoint()) && !toolbarRect.contains(point.toPoint()) &&
@@ -774,15 +786,10 @@ bool Reader::eventFilter(QObject *watched, QEvent *event) {
                 showControls();
             }
         }
-        if (isVisible() && choosingTypography && choices->isVisible() && !fontDefaultDialog) {
+        if (inWindow && isVisible() && choosingTypography && choices->isVisible() && !fontDefaultDialog) {
             QPointF point;
-            if (touch) {
-                const auto points = kobalt::ui::touchPositions(static_cast<QTouchEvent *>(event), true);
-                if (points.isEmpty())
-                    return QWidget::eventFilter(watched, event);
-                point = points.first();
-            } else
-                point = kobalt::ui::mousePosition(static_cast<QMouseEvent *>(event), true);
+            if (!pressPoint(point))
+                return QWidget::eventFilter(watched, event);
             const auto openingMenu = [&](const char *name) {
                 const auto *button = findChild<QPushButton *>(name);
                 return button->isVisible() && button->isEnabled() &&
