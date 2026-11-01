@@ -434,6 +434,7 @@
 "header_footer.preset.default" = "Kobalt";
 "header_footer.preset.alternative_a" = "Bookish";
 "header_footer.preset.alternative_b" = "Ember";
+"header_footer.preset.phone" = "Phone";
 "header_footer.preset.custom" = "Custom";
 /* Arguments: %1, %2 */
 "header_footer.page_of" = "%1 of %2";

@@ -95,6 +95,7 @@ inline QString screenshotTitle(const QString &scene, const QJsonObject &book) {
         {"footnotes-long-preview", "Long footnote"},
         {"footnotes-page-2", "Footnote · Page 2"},
         {"footnotes-preview", "Footnote preview"},
+        {"header-footer-fields", "Choose a header or footer field"},
         {"header-footer", "Headers and footers"},
         {"header-footer-large", "Headers and footers: enlarged text"},
         {"header-footer-off", "Headers and footers: disabled"},
@@ -231,7 +232,7 @@ inline QByteArray screenshotGallery(const QString &directory, const QJsonArray &
         const auto device = shot["device"].toString();
         const auto theme = shot["theme"].toString();
         if (QFileInfo(file).fileName() != file || !file.endsWith(".png") || QFileInfo(directory + '/' + file).isSymLink() ||
-            (device != "six-inch" && device != "seven-inch") || (theme != "light" && theme != "dark" && theme != "large") ||
+            (device != "six-inch" && device != "seven-inch" && device != "phone" && device != "six-inch-landscape") || (theme != "light" && theme != "dark" && theme != "large") ||
             shot["capture"] != "screen" || shot["ppi"].toInt() != 300 || screen.isEmpty() || capturePage < 1) { qCritical() << "Invalid screenshot metadata:" << file; return {}; }
         const auto variant = device + '/' + theme;
         if (variants[screen][variant].contains(capturePage)) { qCritical() << "Duplicate screenshot page:" << file; return {}; }
@@ -260,11 +261,12 @@ inline QByteArray screenshotGallery(const QString &directory, const QJsonArray &
         const auto &pages = variants[it.key()];
         // Light, dark and light with 150% text at both sizes. Larger text can
         // add pages, so only the two themes must match page for page.
-        if (pages.size() != 6) { qCritical() << "Missing screenshot variants:" << it.key() << pages.keys(); return {}; }
-        for (const auto &device : {QString("six-inch"), QString("seven-inch")}) {
+        if (pages.size() != 11) { qCritical() << "Missing screenshot variants:" << it.key() << pages.keys(); return {}; }
+        for (const auto &device : {QString("six-inch"), QString("seven-inch"), QString("phone"), QString("six-inch-landscape")}) {
             const auto light = pages.value(device + "/light");
             if (light != pages.value(device + "/dark")) { qCritical() << "Screenshot theme pages differ:" << it.key() << device << light << pages.value(device + "/dark"); return {}; }
             for (const auto &theme : {QString("light"), QString("large")}) {
+                if (device == "phone" && theme == "large") continue;
                 const auto captured = pages.value(device + '/' + theme);
                 for (int page = 1; page <= captured.size(); ++page)
                     if (!captured.contains(page)) { qCritical() << "Screenshot page missing:" << it.key() << device << theme << page; return {}; }

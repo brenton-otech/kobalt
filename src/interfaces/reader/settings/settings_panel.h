@@ -129,5 +129,6 @@ private:
     AdvancedText stylingFeature = AdvancedText::WordSpacing;
     int stylingChoice = 0;
     void showStylingPreview();
+    void fitStylingCard();
 };
 }

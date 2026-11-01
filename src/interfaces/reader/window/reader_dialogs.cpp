@@ -969,6 +969,7 @@ void Reader::openSleepChoice(const QString &name, const QString &optionPrefix, c
     const int cardWidth = qMin<int>(m::notice::cardWidth, width() - 2 * m::notice::sideClearance);
     auto *choices = new ui::RadioList(card);
     choices->setObjectName(name + "Choices");
+    choices->setUniformRows(false);
     choices->setMinimumRowHeight(c::listActionHeight);
     choices->setTopDivider(true);
     for (const auto &option : options)
@@ -981,6 +982,35 @@ void Reader::openSleepChoice(const QString &name, const QString &optionPrefix, c
     card->rows()->addWidget(choices);
     choices->setFixedHeight(choices->heightForWidth(cardWidth - 4));
     card->fitToWidth(cardWidth);
+    const int available = height() - 2 * m::notice::sideClearance;
+    if (card->height() > available) {
+        auto *pager = new ui::PagerBar(card, name);
+        card->rows()->addWidget(pager);
+        const int fixed = card->height() - choices->height();
+        const int room = qMax(1, available - fixed - int(c::actionHeight));
+        QVector<int> starts{0};
+        int used = 0;
+        for (int row = 0; row < choices->options().size(); ++row) {
+            const int rowHeight = choices->rowHeight(row, cardWidth - 4);
+            if (used && used + rowHeight > room) { starts.append(row); used = 0; }
+            used += rowHeight;
+        }
+        auto page = std::make_shared<int>(0);
+        for (int index = 0; index < starts.size(); ++index)
+            if (starts[index] <= current) *page = index;
+        const auto showPage = [this, choices, pager, card, cardWidth, starts, room, page] {
+            const int first = starts[*page];
+            const int last = *page + 1 < starts.size() ? starts[*page + 1] : int(choices->options().size());
+            choices->showRows(first, last - first);
+            choices->setFixedHeight(room);
+            pager->setPage(*page, starts.size());
+            card->fitToWidth(cardWidth);
+            sleepPopup->centerCard();
+        };
+        connect(pager->previous, &QPushButton::clicked, this, [page, pager, showPage] { *page = pager->turnTarget(-1); showPage(); });
+        connect(pager->next, &QPushButton::clicked, this, [page, pager, showPage] { *page = pager->turnTarget(1); showPage(); });
+        showPage();
+    }
     sleepPopup->centerCard();
     for (auto *widget : sleepPopup->findChildren<QWidget *>()) {
         textRefresh(widget);

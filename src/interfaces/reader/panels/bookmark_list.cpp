@@ -456,9 +456,9 @@ void BookmarkList::paintEvent(QPaintEvent *event) {
 void BookmarkList::arrange() {
     const int first = pageStarts.value(page, 0), top = listTop(), available = qMax(1, height() - top);
     const auto font = excerptFont();
-    const int lineHeight = ui::px(44);
     const int textLineHeight = ui::needsPrivateText(QStringLiteral("Mg"), font)
         ? ui::measurePrivateTextLayout(QStringLiteral("Mg"), font).lineHeight : QFontMetrics(font).lineSpacing();
+    const int lineHeight = qMax(ui::px(44), qMax(textLineHeight, ui::interfaceLineHeight(ui::interfaceFont(c::captionText))));
     const int textWidth = qMax(1, width() - c::cellWidth - 2 * ui::metrics::list::inset);
     if (excerptCacheFont != font || excerptCacheWidth != textWidth || excerptCacheLineHeight != textLineHeight) {
         excerptLineCache.clear();

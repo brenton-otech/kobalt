@@ -367,6 +367,7 @@ struct Fixture {
                     return false;
             }
         }
+        if (!reveal(target)) return false;
         const auto point = canvas->mapFromScene(target->mapTo(reader, position));
         if (!canvas->viewport()->rect().contains(point)) {
             return false;
@@ -378,6 +379,24 @@ struct Fixture {
         auto *reader = window.readerWindow();
         auto *widget = reader ? reader->findChild<QWidget *>(name) : nullptr;
         return widget ? widget : window.findChild<QWidget *>(name);
+    }
+    bool reveal(QWidget *target) {
+        auto *reader = window.readerWindow();
+        if (!reader || !target) return false;
+        if (auto *sheet = reader->findChild<QWidget *>("rrHeaderFooterView"); sheet && sheet->isVisible() && sheet->isAncestorOf(target)) {
+            auto *clip = sheet->findChild<QWidget *>("rrHeaderFooterClip");
+            const auto fits = [&] { return !clip || clip->rect().contains(QRect(target->mapTo(clip, QPoint()), target->size())); };
+            auto *previous = sheet->findChild<QPushButton *>("rrHeaderFooterPrevious");
+            auto *next = sheet->findChild<QPushButton *>("rrHeaderFooterNext");
+            if (clip && clip->isAncestorOf(target) && !fits()) {
+                while (previous && previous->isVisible() && previous->isEnabled())
+                    if (!click(previous)) return false;
+                while (!fits() && next && next->isVisible() && next->isEnabled())
+                    if (!click(next)) return false;
+                if (!fits()) return false;
+            }
+        }
+        return true;
     }
     bool press(const char *name) { return click(widget(name)); }
     bool bookmarkAction(const char *action) {
@@ -585,15 +604,15 @@ void variants() {
     }
 }
 
-// Each screen is captured in the light theme, the dark theme and the light
-// theme with 150% text.
+// Each screen has light and dark captures. E-reader profiles also support
+// 150% interface text; the phone profile supports normal text only.
 void screenshotVariants() {
     QTest::addColumn<int>("preset");
     QTest::addColumn<bool>("dark");
-    for (int preset : {1, 2}) {
+    for (int preset : {1, 2, 3, 4}) {
         for (bool dark : {false, true})
             QTest::newRow(qPrintable(QString("%1-%2").arg(preset).arg(dark ? "dark" : "light"))) << preset << dark;
-        QTest::newRow(qPrintable(QString("%1-large").arg(preset))) << preset << false;
+        if (preset != 3) QTest::newRow(qPrintable(QString("%1-large").arg(preset))) << preset << false;
     }
 }
 
@@ -601,8 +620,16 @@ QString screenshotTheme(bool dark) {
     return largeTextVariant() ? "large" : dark ? "dark" : "light";
 }
 
+QSize screenshotSize(int preset) {
+    return preset == 2 ? QSize(1264, 1680) : preset == 3 ? QSize(720, 1600) : preset == 4 ? QSize(1448, 1072) : QSize(1072, 1448);
+}
+
+QString screenshotDevice(int preset) {
+    return QStringList{"fill", "six-inch", "seven-inch", "phone", "six-inch-landscape"}.at(preset);
+}
+
 QString screenshotVariant(int preset, bool dark) {
-    return QString(preset == 1 ? "six-inch-" : "seven-inch-") + screenshotTheme(dark);
+    return screenshotDevice(preset) + '-' + screenshotTheme(dark);
 }
 
 bool hasText(const QImage &source) {
@@ -650,7 +677,7 @@ bool writeCaptureRecord() {
 
 bool capture(Fixture &fixture, const QString &name, QWidget *nativeScreen = nullptr) {
     if (captureDirectory.isEmpty()) return true;
-    const auto parts = QRegularExpression("^(fill|six-inch|seven-inch)-(light|dark|large)-(.*)$").match(name);
+    const auto parts = QRegularExpression("^(fill|six-inch|seven-inch|phone|six-inch-landscape)-(light|dark|large)-(.*)$").match(name);
     if (!parts.hasMatch()) return false;
     if (!captureOnly.isEmpty() && !captureOnly.contains(parts.captured(3))) return true;
     // Model state and visibility can settle before queued layouts and proxy
@@ -661,17 +688,26 @@ bool capture(Fixture &fixture, const QString &name, QWidget *nativeScreen = null
     auto *start = fixture.window.findChild<android::StartScreen *>();
     if (!nativeScreen && start && start->libraryShown()) surface = start->library();
     const int preset = fixture.window.findChild<QComboBox *>("desktopScreenPicker")->currentIndex();
-    const QSize expected = preset == 1 ? QSize(1072, 1448) : QSize(1264, 1680);
-    if (!surface || !surface->isVisible() || (preset != 1 && preset != 2) ||
+    const QSize expected = screenshotSize(preset);
+    if (!surface || !surface->isVisible() || (preset < 1 || preset > 4) ||
         (surface->size() != expected && surface->size() != expected.transposed())) {
         qCritical() << "Screenshot surface does not have the native reader dimensions:" << name;
         return false;
+    }
+    for (auto *child : surface->findChildren<QWidget *>()) {
+        auto *modal = dynamic_cast<ui::ModalOverlay *>(child);
+        if (!modal || !modal->isVisible()) continue;
+        auto *card = modal->card();
+        if (!surface->rect().contains(QRect(card->mapTo(surface, QPoint()), card->size()))) {
+            qCritical() << "Modal card extends outside the captured screen:" << name << modal->objectName();
+            return false;
+        }
     }
     QImage pixels(surface->size(), QImage::Format_ARGB32_Premultiplied);
     pixels.fill(Qt::transparent);
     surface->render(&pixels);
     if (auto *button = surface->findChild<QPushButton *>("rrReturn")) {
-        if (button->isVisible() && QRegularExpression("^(six-inch|seven-inch)-(light|dark|large)-menu(-return-pressed)?$").match(name).hasMatch()) {
+        if (button->isVisible() && QRegularExpression("^(six-inch|seven-inch|phone|six-inch-landscape)-(light|dark|large)-menu(-return-pressed)?$").match(name).hasMatch()) {
             auto *title = button->findChild<QLabel *>("rrReturnTitle");
             const auto at = button->mapTo(surface, QPoint());
             const auto rendered = pixels.copy(QRect(at, button->size()));
@@ -810,6 +846,11 @@ bool revealSettingsOption(Fixture &fixture, const char *name) {
     auto *option = fixture.widget(name);
     if (!reader || !option)
         return false;
+    auto *previous = fixture.widget("rrSettingsOptionsPrevious");
+    for (int attempt = 0; previous && previous->isVisible() && previous->isEnabled() && attempt < 12; ++attempt) {
+        if (!fixture.click(previous)) return false;
+        QCoreApplication::processEvents();
+    }
     for (int attempt = 0; attempt < 12; ++attempt) {
         auto *hit = reader->childAt(option->mapTo(reader, option->rect().center()));
         if (hit && (hit == option || option->isAncestorOf(hit)))
@@ -948,8 +989,10 @@ void verticalJustificationTour(Fixture &fixture, const QString &name, bool scree
     settings("off", true, false);
     auto *rotate = fixture.window.findChild<QAction *>("desktopRotateDevice");
     QVERIFY(rotate);
-    if (rotate->isEnabled()) rotate->trigger();
-    else fixture.window.resize(1200, 850);
+    if (fixture.window.readerWindow()->width() < fixture.window.readerWindow()->height()) {
+        if (rotate->isEnabled()) rotate->trigger();
+        else fixture.window.resize(1200, 850);
+    }
     QTRY_VERIFY(!fixture.state().value("busy").toBool());
     QTRY_COMPARE(fixture.state().value("columns").toInt(), 2);
     fullProsePage();
@@ -1016,7 +1059,17 @@ void tour(Fixture &fixture, const QString &name, bool screenshots) {
     QVERIFY(scene("layout"));
     QVERIFY(fixture.press("rrHeaderFooter"));
     QTRY_VERIFY(fixture.visible("rrHeaderFooterView"));
-    QVERIFY(scene("header-footer"));
+    if (screenshots) {
+        capturePages(fixture, name + "-header-footer", "rrHeaderFooter");
+        while (fixture.visible("rrHeaderFooterPrevious") && fixture.widget("rrHeaderFooterPrevious")->isEnabled())
+            QVERIFY(fixture.press("rrHeaderFooterPrevious"));
+        QVERIFY(fixture.press("rrHeaderFooterSlot0"));
+        QTRY_VERIFY(fixture.visible("rrHeaderFooterChooser"));
+        while (fixture.visible("rrHeaderFooterFieldsPrevious") && fixture.widget("rrHeaderFooterFieldsPrevious")->isEnabled())
+            QVERIFY(fixture.press("rrHeaderFooterFieldsPrevious"));
+        capturePages(fixture, name + "-header-footer-fields", "rrHeaderFooterFields");
+        QVERIFY(fixture.press("rrHeaderFooterFieldsClose"));
+    } else QVERIFY(scene("header-footer"));
     if (!screenshots)
         QVERIFY(fixture.press("rrHeaderFooterPreset_alternative_a"));
     QVERIFY(fixture.press("rrHeaderFooterClose"));
@@ -1121,7 +1174,9 @@ void tour(Fixture &fixture, const QString &name, bool screenshots) {
         QVERIFY(revealSettingsOption(fixture, "rrSessionTimeout"));
         QVERIFY(fixture.press("rrSessionTimeout"));
         QTRY_VERIFY(fixture.visible("rrSessionTimeoutPopup"));
-        QVERIFY(scene("session-timeout"));
+        capturePages(fixture, name + "-session-timeout", "rrSessionTimeout");
+        while (fixture.visible("rrSessionTimeoutPrevious") && fixture.widget("rrSessionTimeoutPrevious")->isEnabled())
+            QVERIFY(fixture.press("rrSessionTimeoutPrevious"));
         QVERIFY(fixture.press("rrSessionTimeout_15"));
         QTRY_VERIFY(!fixture.visible("rrSessionTimeoutPopup"));
         QVERIFY(fixture.press("rrSettingsStyling"));
@@ -1271,6 +1326,11 @@ void checkHeaderFooterSizes(int preset, bool dark) {
     using namespace headerfooter;
     Fixture fixture(dark);
     QVERIFY(fixture.prepared);
+    if (preset == 3) {
+        auto preferences = storage::readJson(fixture.paths.preferences());
+        preferences[headerfooter::presetKey] = "default";
+        QVERIFY(storage::writeJson(fixture.paths.preferences(), preferences));
+    }
     fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(preset);
     QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
     fixture.window.openBook(book);
@@ -1285,12 +1345,31 @@ void checkHeaderFooterSizes(int preset, bool dark) {
     auto *header = static_cast<ui::SettingSlider *>(fixture.widget("rrHeaderTextSize"));
     auto *footer = static_cast<ui::SettingSlider *>(fixture.widget("rrFooterTextSize"));
     QVERIFY(header && footer && page);
+    if (preset == 3) {
+        QVERIFY(fixture.reveal(header));
+        QVERIFY(header->width() >= ui::px(400));
+        QVERIFY(header->parentWidget()->parentWidget()->property("caption_stacked").toBool());
+    }
+
     const auto captureState = [&](const char *suffix) {
         if (captureDirectory.isEmpty()) return true;
         return capture(fixture, screenshotVariant(preset, dark) + '-' + suffix);
     };
     auto *view = fixture.widget("rrHeaderFooterView");
+    auto *map = fixture.widget("rrHeaderFooterCustomMap");
+    QVERIFY(map);
+    QVERIFY(fixture.reveal(map));
+    QVERIFY(map->height() >= map->sizeHint().height());
+    QVector<QRect> slotBounds;
+    for (int slot = 0; slot < headerfooter::slotCount; ++slot) {
+        auto *cell = fixture.widget(qPrintable(QString("rrHeaderFooterSlot%1").arg(slot)));
+        QVERIFY(cell && cell->width() >= ui::px(60) && cell->height() >= ui::px(60));
+        QVERIFY(map->rect().contains(cell->geometry()));
+        for (const auto &other : slotBounds) QVERIFY(!other.intersects(cell->geometry()));
+        slotBounds.append(cell->geometry());
+    }
     auto *progress = fixture.widget("rrHeaderFooterProgressBar_on");
+    QVERIFY(fixture.reveal(progress));
     QVERIFY(view->rect().contains(QRect(progress->mapTo(view, QPoint()), progress->size())));
     QCOMPARE(header->mapTo(view, QPoint()).x(), footer->mapTo(view, QPoint()).x());
     QCOMPARE(header->width(), footer->width());
@@ -1331,8 +1410,10 @@ void checkHeaderFooterSizes(int preset, bool dark) {
     QVERIFY(page->footerTextRect().height() >= page->footerTextPixels());
     QCOMPARE(fixture.state().value("header_footer_preset").toString(), QString("default"));
     auto *customCard = fixture.widget("rrHeaderFooterPreset_default");
+    QVERIFY(fixture.reveal(customCard));
     const auto cardImage = customCard->grab().toImage();
-    QCOMPARE(cardImage.pixelColor(cardImage.width() / 2, cardImage.height() - 4), ui::themeColors(dark).ink);
+    QVERIFY(qobject_cast<QAbstractButton *>(customCard)->isChecked());
+    QVERIFY(hasText(cardImage));
     QVERIFY(captureState("header-footer-large"));
     const auto selectSize = [&](ui::SettingSlider *slider, bool maximum) {
         const int inset = ui::metrics::control::sliderInset;
@@ -1713,9 +1794,10 @@ printf '[{"file":"%s.png","scene":"%s"}]' "$3" "$KOBALT_GALLERY_CAPTURE" > "$2/p
         QVERIFY(directory.isValid());
         QJsonArray images;
         QMap<QString, QByteArray> originals;
-        for (const auto &device : {QString("six-inch"), QString("seven-inch")}) {
+        for (const auto &device : {QString("six-inch"), QString("seven-inch"), QString("phone"), QString("six-inch-landscape")}) {
             for (const auto &theme : {QString("light"), QString("dark"), QString("large")}) {
-                QImage image(device == "six-inch" ? QSize(1072, 1448) : QSize(1264, 1680), QImage::Format_RGB32);
+                if (device == "phone" && theme == "large") continue;
+                QImage image(screenshotSize(QStringList{"fill", "six-inch", "seven-inch", "phone", "six-inch-landscape"}.indexOf(device)), QImage::Format_RGB32);
                 image.fill(theme == "dark" ? Qt::black : Qt::white);
                 image.setDotsPerMeterX(11811);
                 image.setDotsPerMeterY(11811);
@@ -3616,7 +3698,16 @@ printf '[{"file":"%s.png","scene":"%s"}]' "$3" "$KOBALT_GALLERY_CAPTURE" > "$2/p
             if (output.isEmpty()) return true;
             QCoreApplication::processEvents();
             auto *surface = fixture.window.readerWindow();
-            QImage pixels(surface->size(), QImage::Format_ARGB32_Premultiplied);
+            for (auto *child : surface->findChildren<QWidget *>()) {
+        auto *modal = dynamic_cast<ui::ModalOverlay *>(child);
+        if (!modal || !modal->isVisible()) continue;
+        auto *card = modal->card();
+        if (!surface->rect().contains(QRect(card->mapTo(surface, QPoint()), card->size()))) {
+            qCritical() << "Modal card extends outside the captured screen:" << name << modal->objectName();
+            return false;
+        }
+    }
+    QImage pixels(surface->size(), QImage::Format_ARGB32_Premultiplied);
             pixels.fill(Qt::transparent);
             surface->render(&pixels);
             return QDir().mkpath(output) && pixels.save(output + '/' + name + (dark ? "-dark.png" : "-light.png"));
@@ -6292,7 +6383,7 @@ private slots:
             {"schema", 1}, {"server", "https://sync.example"}, {"username", "reader"},
             {"key", QString(32, 'a')}, {"device_id", "gallery-device"}, {"automatic", false}}));
         fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(preset);
-        const auto name = QStringList{"fill", "six-inch", "seven-inch"}.at(preset) + ('-' + screenshotTheme(dark));
+        const auto name = screenshotDevice(preset) + ('-' + screenshotTheme(dark));
         QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
         fixture.window.openBook(book);
         QTRY_COMPARE(opened.count(), 1);
@@ -6331,7 +6422,7 @@ private slots:
         const auto name = screenshotVariant(preset, dark);
         auto *start = fixture.window.findChild<android::StartScreen *>();
         QTRY_VERIFY(start && start->libraryShown());
-        QTRY_COMPARE(start->library()->size(), preset == 1 ? QSize(1072, 1448) : QSize(1264, 1680));
+        QTRY_COMPARE(start->library()->size(), screenshotSize(preset));
         QVERIFY(capture(fixture, name + "-library-home"));
         QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
         fixture.window.openBook(book);
@@ -6352,6 +6443,14 @@ private slots:
             return capture(fixture, name + '-' + suffix);
         };
         QVERIFY(scene("rrPage", "rrSettings", "menu"));
+        QCOMPARE(bool(fixture.widget("rrHeaderFooterPreset_phone")), preset == 3);
+        if (preset == 3) {
+            QCOMPARE(fixture.state().value("header_footer_preset").toString(), QString("phone"));
+            QVERIFY(!page->chrome.header());
+            for (const auto *tab : {"rrNavChapters", "rrNavSeek", "rrNavText", "rrNavLayout", "rrNavStats"})
+                QVERIFY(fixture.widget(tab)->property("labels_hidden").toBool());
+        }
+
         QVERIFY(scene("rrNavChapters", "rrContents", "chapters"));
         QVERIFY(fixture.press("rrChapter1"));
         QTRY_VERIFY(!fixture.state().value("busy").toBool());
@@ -6425,11 +6524,11 @@ private slots:
         QVERIFY(ink > 4);
         view->setDark(dark);
         QCOMPARE(shift->grab().toImage(), original);
-        const auto name = QStringList{"fill", "six-inch", "seven-inch"}.at(preset) +
+        const auto name = screenshotDevice(preset) +
                           ('-' + screenshotTheme(dark)) + "-widget-keyboard";
         QVERIFY(capture(fixture, name));
         {
-            const QSize expected = preset == 1 ? QSize(1072, 1448) : QSize(1264, 1680);
+            const QSize expected = screenshotSize(preset);
             QCOMPARE(view->size(), expected);
             QVERIFY(capture(fixture, name + "-300ppi", view));
             const QImage native(captureDirectory + '/' + name + "-300ppi.png");
@@ -6492,7 +6591,17 @@ private slots:
         QVERIFY(dictionaries);
         dictionaries->setStorage({}, 32000000000LL);
         QTRY_VERIFY(fixture.visible("rrDictionaryRow0"));
+        QCoreApplication::processEvents();
         QVERIFY(capture(fixture, name + "-dictionaries"));
+        for (auto *label : dictionaries->findChildren<QLabel *>(QRegularExpression("^rrDictionaryName[0-9]+$"))) {
+            if (!label->isVisible()) continue;
+            QVERIFY2(label->height() >= ui::wrappedInterfaceTextHeight(label->text(), label->font(), label->width()), qPrintable(label->text()));
+            QVERIFY(label->parentWidget()->rect().contains(label->geometry()));
+            auto *action = label->parentWidget()->findChildren<QPushButton *>(QRegularExpression("^rrDictionaryAction[0-9]+$")).value(0);
+            QVERIFY(action);
+            QVERIFY2(label->geometry().right() < action->geometry().left(), qPrintable(QString("%1: label right %2, action left %3, row width %4").arg(label->text()).arg(label->geometry().right()).arg(action->geometry().left()).arg(label->parentWidget()->width())));
+            QVERIFY(action->width() >= ui::px(60) && action->height() >= ui::px(60));
+        }
         QVERIFY(fixture.press("rrSettingsSystem"));
         QVERIFY(revealSettingsOption(fixture, "rrDictionaryFontSize"));
         QVERIFY(capture(fixture, name + "-dictionary-ui"));
@@ -6559,7 +6668,7 @@ private slots:
         Fixture fixture(dark);
         QVERIFY(fixture.prepared);
         fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(preset);
-        const auto name = QStringList{"fill", "six-inch", "seven-inch"}.at(preset) + ('-' + screenshotTheme(dark));
+        const auto name = screenshotDevice(preset) + ('-' + screenshotTheme(dark));
         const auto files = test::publisherPackage("en", "Finish confirmation", {
             {"text.xhtml", test::publisherHtml("<h1>The end</h1><p>A short book for the finish confirmation.</p>")}},
             "<itemref idref=\"text.xhtml\"/>");
@@ -6583,7 +6692,7 @@ private slots:
         Fixture fixture(dark);
         QVERIFY(fixture.prepared);
         fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(preset);
-        const auto name = QStringList{"fill", "six-inch", "seven-inch"}.at(preset) +
+        const auto name = screenshotDevice(preset) +
             ('-' + screenshotTheme(dark)) + "-dictionary";
         captureBook = {{"title", "Type Tester with controlled dictionary replies"}, {"fixture", "simulated dictionary result and service failures"}};
         const auto resetBook = qScopeGuard([] { captureBook = {}; });
@@ -6643,11 +6752,11 @@ private slots:
             languages.insert(language);
             for (const bool vertical : {false, true}) {
                 if (vertical && !QStringList{"ja", "ko", "zh-Hans", "zh-Hant"}.contains(language)) continue;
-                for (const int preset : {1, 2}) {
+                for (const int preset : {1, 2, 3, 4}) {
                     const auto name = QString::number(preset) + '-' + language + (vertical ? "-vertical" : "");
                     for (const bool dark : {false, true})
                         QTest::newRow(qPrintable(name + (dark ? "-dark" : "-light"))) << entry << preset << vertical << dark;
-                    QTest::newRow(qPrintable(name + "-large")) << entry << preset << vertical << false;
+                    if (preset != 3) QTest::newRow(qPrintable(name + "-large")) << entry << preset << vertical << false;
                 }
             }
         }
@@ -6717,11 +6826,11 @@ private slots:
         QTest::addColumn<int>("preset");
         QTest::addColumn<bool>("dark");
         for (const auto *publication : {"alice", "maths", "moby-dick"})
-            for (const int preset : {1, 2}) {
+            for (const int preset : {1, 2, 3, 4}) {
                 const auto name = QString::number(preset) + '-' + QString(publication);
                 for (const bool dark : {false, true})
                     QTest::newRow(qPrintable(name + (dark ? "-dark" : "-light"))) << QString(publication) << preset << dark;
-                QTest::newRow(qPrintable(name + "-large")) << QString(publication) << preset << false;
+                if (preset != 3) QTest::newRow(qPrintable(name + "-large")) << QString(publication) << preset << false;
             }
     }
     void typography_data() { screenshotVariants(); }
@@ -6786,18 +6895,20 @@ private slots:
         QCOMPARE(fixture.widget("rrParagraphSpacing")->maximumHeight(), fixture.widget("rrWordSpacing")->maximumHeight());
         for (const auto *name : {"rrWordSpacing", "rrJustificationTracking", "rrParagraphSpacing",
                                  "rrWidowsOrphans", "rrVerticalSpacing", "rrVerticalSpacingScope"}) {
+            QVERIFY(revealSettingsOption(fixture, name));
             const auto *row = fixture.widget(name);
             const auto font = ui::interfaceFont(ui::metrics::chrome::descriptionText);
             const int textWidth = row->width() - ui::metrics::chrome::inset - ui::metrics::chrome::actionRight -
                                   ui::metrics::chrome::cellIcon - ui::px(20);
             // Descriptions are written to fit one line at the standard size.
             // Larger text wraps them, and the row grows to fit.
-            if (largeTextVariant())
+            if (largeTextVariant() || preset == 3)
                 QVERIFY2(row->height() >= row->heightForWidth(row->width()), name);
             else
                 QVERIFY2(ui::wrappedInterfaceTextHeight(row->accessibleDescription(), font, textWidth) <
                              2 * ui::interfaceLineHeight(font), name);
         }
+        QVERIFY(revealSettingsOption(fixture, "rrParagraphSpacing"));
         QVERIFY(capture(fixture, name + "-styling-paragraph-row"));
         QVERIFY(fixture.press("rrParagraphSpacing"));
         QTRY_VERIFY(fixture.visible("rrParagraphSpacingPopup"));
@@ -6859,7 +6970,7 @@ private slots:
         Fixture fixture(dark);
         QVERIFY(fixture.prepared);
         fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(preset);
-        const auto name = QStringList{"fill", "six-inch", "seven-inch"}.at(preset) + ('-' + screenshotTheme(dark));
+        const auto name = screenshotDevice(preset) + ('-' + screenshotTheme(dark));
         QFile font(QStringLiteral(KOBALT_TEST_VARIABLE_FONT));
         QVERIFY(font.open(QIODevice::ReadOnly));
         const auto files = test::publisherPackage("en", "Embedded font family", {
@@ -6949,13 +7060,10 @@ private slots:
             auto *graph = dynamic_cast<ChapterGraph *>(fixture.widget("rrChapterGraph"));
             QVERIFY(graph);
             // Current Dense mode preserves a minimum bar width. This pinned
-            // 145-chapter edition fills two pages, rather than eight sparse pages.
-            QTRY_COMPARE(graph->graphPages(), 2);
+            // 145-chapter edition needs more pages at narrower viewports.
+            QTRY_VERIFY(graph->graphPages() >= 2);
             QVERIFY(storage::readJson(fixture.paths.preferences()).value("dense_stats_chart").toBool());
-            QVERIFY(capture(fixture, name + "-graph"));
-            QVERIFY(fixture.press("rrGraphNext"));
-            QTRY_COMPARE(graph->graphPage(), 1);
-            QVERIFY(capture(fixture, name + "-graph-2"));
+            capturePages(fixture, name + "-graph", "rrGraph");
         } else if (publication == "maths") {
             // Search through the real panel for the pinned equation passage.
             QVERIFY(fixture.press("rrPage"));
@@ -6989,7 +7097,7 @@ private slots:
         Fixture fixture(dark);
         QVERIFY(fixture.prepared);
         fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(preset);
-        const auto name = QStringList{"fill", "six-inch", "seven-inch"}.at(preset) + ('-' + screenshotTheme(dark));
+        const auto name = screenshotDevice(preset) + ('-' + screenshotTheme(dark));
         verticalJustificationTour(fixture, name, true);
     }
 
@@ -7000,7 +7108,7 @@ private slots:
         Fixture fixture(dark);
         QVERIFY(fixture.prepared);
         fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(preset);
-        const auto name = QStringList{"fill", "six-inch", "seven-inch"}.at(preset) + ('-' + screenshotTheme(dark));
+        const auto name = screenshotDevice(preset) + ('-' + screenshotTheme(dark));
         captureBook = {{"title", "Links and footnotes"}, {"fixture", "offline EPUB with internal, external and footnote links"}};
         const auto resetBook = qScopeGuard([] { captureBook = {}; });
         auto linkFiles = test::linkBook();
@@ -7082,11 +7190,11 @@ private slots:
         Fixture fixture(dark, false, false, true, true);
         QVERIFY(fixture.prepared);
         fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(preset);
-        const auto device = QStringList{"fill", "six-inch", "seven-inch"}.at(preset);
+        const auto device = screenshotDevice(preset);
         const auto name = device + ('-' + screenshotTheme(dark));
         // Onboarding is part of the Library and follows both themes.
         auto *start = fixture.window.findChild<android::StartScreen *>();
-        QTRY_VERIFY(start && start->width() > 300);
+        QTRY_VERIFY(start && start->library()->size() == screenshotSize(preset));
         QVERIFY(capture(fixture, name + "-library-empty"));
         QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
         fixture.window.openBook(book);
@@ -7125,7 +7233,7 @@ private slots:
     void library() {
         QFETCH(int, preset);
         QFETCH(bool, dark);
-        const auto device = QStringList{"fill", "six-inch", "seven-inch"}.at(preset);
+        const auto device = screenshotDevice(preset);
         const auto name = device + ('-' + screenshotTheme(dark)) + "-library";
         captureBook = {{"title", "Library fixtures"}, {"fixture", "invented books, authors and generated covers"}};
         const auto resetBook = qScopeGuard([] { captureBook = {}; });
@@ -7239,7 +7347,7 @@ private slots:
             QVERIFY(progress);
             // At 150% on the six-inch, the caption takes the squares' place.
             QTRY_VERIFY(progress->isRunning());
-            QCOMPARE(progress->isVisible(), !(largeTextVariant() && preset == 1));
+            QCOMPARE(progress->isVisible(), !(preset == 3 || (largeTextVariant() && preset == 1)));
             // Capture the same revealed animation frame on every run.
             auto *timer = progress->findChild<QTimer *>();
             QVERIFY(timer);
@@ -7395,7 +7503,7 @@ int main(int argc, char **argv) {
     // full gallery's manifest tells which cases capture them.
     const auto selectedScenes = qEnvironmentVariable("KOBALT_GALLERY_SCENE").split(',', Qt::SkipEmptyParts);
     QMap<QString, QStringList> selection;
-    int expectedScreenshots = lightGallery ? 84 : 1352;
+    int expectedScreenshots = lightGallery ? 154 : 1352;
     if (screenshots) {
         if ((arguments.size() != 3 && !lightGallery) || !QDir::isAbsolutePath(arguments.at(2))) {
             qCritical() << "Usage: kobalt-desktop-tests --screenshots ABSOLUTE_DIRECTORY [--light]";

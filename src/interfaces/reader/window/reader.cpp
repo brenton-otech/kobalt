@@ -1667,7 +1667,7 @@ void Reader::syncNavigation() {
              pageNavigation::menuView(preferences) == pageNavigation::MenuView::Seek    ? int(Nav::Seek)
              : pageNavigation::menuView(preferences) == pageNavigation::MenuView::Stats ? int(Nav::Stats)
                                                                                         : -1,
-             preferences.value("hide_tab_labels").toBool(false)});
+             (services.phoneLayout || preferences.value("hide_tab_labels").toBool(false))});
     };
     update();
     syncLinkDiscovery();

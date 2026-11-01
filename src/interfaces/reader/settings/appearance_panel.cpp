@@ -57,17 +57,15 @@ private:
 };
 }
 
-StripSizeControl::StripSizeControl(QWidget *parent, bool footer) : QWidget(parent) {
+StripSizeControl::StripSizeControl(QWidget *parent, bool footer) : ui::ControlRow(parent) {
     const QString name = footer ? "rrFooterTextSize" : "rrHeaderTextSize";
     const auto title = strings::get(footer ? "reader.footer" : "reader.header");
-    auto *line = ui::horizontalRow();
-    setLayout(line);
-    auto *caption = new QWidget(this);
-    caption->setFixedWidth(m::control::captionWidth);
+    auto *line = controls();
+    auto *caption = this->caption();
     auto *captionRows = new QVBoxLayout(caption);
     captionRows->setContentsMargins(0, 0, m::control::captionRight, 0);
     captionRows->setSpacing(0);
-    captionRows->addSpacing(m::control::sliderLabelHeight);
+    setMarkerBand(m::control::sliderLabelHeight);
     auto *labels = new QVBoxLayout;
     labels->setSpacing(ui::px(2));
     auto *titleLabel = new ui::InterfaceLabel(title, caption);
@@ -93,7 +91,6 @@ StripSizeControl::StripSizeControl(QWidget *parent, bool footer) : QWidget(paren
     slider->setMarkerLabels({strings::get("common.off"), strings::get("common.size_small_short"),
                              strings::get("common.size_medium_short"), strings::get("common.size_large_short"),
                              strings::get("common.size_extra_large_short")});
-    line->addWidget(caption);
     const auto step = [line](QWidget *button) {
         auto *column = new QVBoxLayout;
         column->setContentsMargins(0, 0, 0, 0);
@@ -374,6 +371,7 @@ AppearancePanel::AppearancePanel(const AppearanceLayout &layout, const Appearanc
     cards->setContentsMargins(0, 0, 0, 0);
     cards->setSpacing(0);
     for (const auto preset : headerfooter::presets) {
+        if (preset == headerfooter::Preset::Phone && !inputs.phone) continue;
         auto *card = new PresetCard(preset, custom);
         card->setDivider(preset != headerfooter::Preset::Custom);
         cards->addWidget(card, 1);

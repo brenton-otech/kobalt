@@ -1319,6 +1319,7 @@ void SettingsPanel::showStylingChoices(AdvancedText feature, int current, std::f
                                      : qRound(stylingPageSize(styleSamplePageSize(), vertical).height() / ratio) +
                                            (edgeHeight ? edgeHeight + ui::px(16) : 0);
     preview->setFixedHeight(sampleHeight + 2 * ui::px(stylingPreviewPadding));
+    preview->setProperty("preferred_height", preview->height());
     rows->addWidget(preview);
     stylingPreview = preview;
     stylingFeature = feature;
@@ -1449,7 +1450,7 @@ void SettingsPanel::showStylingChoices(AdvancedText feature, int current, std::f
         descriptions = {strings::get("settings.paragraph_choices_description")};
     reserve(description, descriptions);
     card->fitToWidth(cardWidth);
-    fontDialog->centerCard();
+    fitStylingCard();
     fontDialog->show();
     fontDialog->raise();
     fontDialog->setFocus();
@@ -1457,6 +1458,22 @@ void SettingsPanel::showStylingChoices(AdvancedText feature, int current, std::f
     if (!stylingSamples.value(int(feature)).valid() && stylingRequested)
         stylingRequested(feature);
 }
+void SettingsPanel::fitStylingCard() {
+    if (!fontDialog || !stylingPreview) return;
+    auto *card = fontDialog->card();
+    auto *preview = stylingPreview.data();
+    preview->setFixedHeight(preview->property("preferred_height").toInt());
+    card->fitToWidth(card->width());
+    const int available = parentWidget()->height() - 2 * m::notice::sideClearance;
+    if (card->height() > available) {
+        // Keep the text and controls at their normal size. The visual sample
+        // uses the space left above them on a phone or a landscape screen.
+        preview->setFixedHeight(qMax(ui::px(120), preview->height() - (card->height() - available)));
+        card->fitToWidth(card->width());
+    }
+    fontDialog->centerCard();
+}
+
 void SettingsPanel::showStylingPreview() {
     auto *preview = static_cast<StylingPreview *>(stylingPreview.data());
     if (!preview)
@@ -1473,8 +1490,7 @@ void SettingsPanel::showStylingPreview() {
         const bool shown = sample.valid() && !sample.differs;
         if (same->isVisible() != shown) {
             same->setVisible(shown);
-            fontDialog->card()->fitToWidth(fontDialog->card()->width());
-            fontDialog->centerCard();
+            fitStylingCard();
         }
     }
 }

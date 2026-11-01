@@ -358,18 +358,16 @@ SettingSlider *sliderRow(QWidget *parent, QVBoxLayout *rows, const char *name, c
                          const QString &label, const char *lessName, const char *moreName, int minimum, int maximum,
                          int step, std::function<void(int)> apply, const QString &prefix, const QString &suffix,
                          const QStringList &markerLabels) {
-    auto *row = new QWidget(parent);
+    auto *row = new ControlRow(parent);
     row->setMinimumHeight(m::control::stepSize);
     rows->addWidget(row);
-    auto *line = horizontalRow();
-    row->setLayout(line);
+    auto *line = row->controls();
     parent = row;
-    auto *caption = new QWidget(parent);
-    caption->setFixedWidth(m::control::captionWidth);
-    line->addWidget(caption);
+    auto *caption = row->caption();
     auto *captionRows = new QVBoxLayout(caption);
     const int labelHeight = markerLabels.isEmpty() ? 0 : int(m::control::sliderLabelHeight);
     captionRows->setContentsMargins(0, labelHeight, m::control::captionRight, 0);
+    row->setMarkerBand(labelHeight);
     captionRows->setSpacing(px(2));
     auto *title = new ui::InterfaceLabel(label.section(':', 0, 0), caption);
     title->setObjectName(QString::fromLatin1(name) + "Caption");

@@ -1,5 +1,6 @@
 #pragma once
 #include <QtGlobal>
+#include <QSize>
 #include <atomic>
 
 namespace kobalt {
@@ -7,6 +8,16 @@ namespace kobalt {
 // pixels, so reading sizes convert here. Each host sets it from its screen;
 // the interface keeps its own copy for UI sizes.
 inline std::atomic<int> readingPpi{300};
+
+// A narrow, elongated screen uses the phone layout in either orientation.
+// The short edge is at most three inches; six-inch e-readers stay wider.
+inline bool isPhoneScreen(QSize screen, int ppi) {
+    const int narrow = qMin(screen.width(), screen.height());
+    const int longEdge = qMax(screen.width(), screen.height());
+    return ppi > 0 && narrow > 0 && qint64(narrow) * 300 <= qint64(ppi) * 900 &&
+           qint64(longEdge) * 5 >= qint64(narrow) * 8;
+}
+
 
 // Reading sizes are designed at 300 ppi, like the UI, and keep their physical
 // size on other screens.

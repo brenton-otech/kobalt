@@ -81,7 +81,7 @@ bool Reader::chromeTicks() const {
 }
 
 void Reader::loadChrome() {
-    const auto chrome = kobalt::headerfooter::select(preferences);
+    const auto chrome = kobalt::headerfooter::select(preferences, services.phoneLayout);
     chromePreset = chrome.preset;
     const int top = page->topHeight(), bottom = page->bottomHeight();
     page->chrome = chrome.layout;
@@ -547,9 +547,9 @@ void Reader::applySettings() {
     next["screen_refresh"] = kobalt::screenRefreshValue(screenRefreshMode);
     if (restoringDefaults) {
         next[kobalt::headerfooter::presetKey] =
-            kobalt::headerfooter::presetValue(kobalt::headerfooter::Preset::Default);
+            kobalt::headerfooter::presetValue(services.phoneLayout ? kobalt::headerfooter::Preset::Phone : kobalt::headerfooter::Preset::Default);
         next[kobalt::headerfooter::textKey] = kobalt::headerfooter::textSettings(
-            kobalt::headerfooter::presetLayout(kobalt::headerfooter::Preset::Default));
+            kobalt::headerfooter::presetLayout(services.phoneLayout ? kobalt::headerfooter::Preset::Phone : kobalt::headerfooter::Preset::Default));
     }
     const auto rotation = orientation->settings();
     for (auto it = rotation.begin(); it != rotation.end(); ++it)
@@ -568,7 +568,7 @@ void Reader::applySettings() {
     applyInterfaceFonts();
     dictionaryPanel->setDefinitionFont(settingsDictionaryFontFace, settingsDictionaryFontSize);
     navigation->setStatusVisible(!hideNativeStatus());
-    const auto chrome = kobalt::headerfooter::select(preferences);
+    const auto chrome = kobalt::headerfooter::select(preferences, services.phoneLayout);
     chromePreset = chrome.preset;
     page->chrome = chrome.layout;
     syncChromeControls();

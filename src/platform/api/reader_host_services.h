@@ -45,6 +45,8 @@ struct ReaderHostServices {
     QString backButtonLabel;
     // Desktop-only presentation preferences; fixtures retain device chrome.
     bool desktopUi = false;
+    // Narrow phone form factor, resolved from native bounds and reader density.
+    bool phoneLayout = false;
     // Kobo supplies its default export folder. Other hosts open a save-location picker.
     std::function<QString()> annotationExportDirectory;
     // Optional native dialog parent for hosts that embed the reader in a canvas.

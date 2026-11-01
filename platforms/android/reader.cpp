@@ -1,4 +1,5 @@
 #include "reading/appearance_settings.h"
+#include "reading/reading_density.h"
 #include "support/strings.h"
 #include "support/main_thread.h"
 #include "support/diagnostics.h"
@@ -197,6 +198,7 @@ void ReaderController::begin(const QString &path, QSize pixels) {
             auto book = std::make_unique<ReadingBook>(std::move(guard->opening), statePath, guard->paths, identity,
                                                       hash, nullptr, ReadingProgress{}, ReadingProgress{}, guard->currentSourceKey);
             auto services = guard->services();
+            services.phoneLayout = isPhoneScreen(pixels, readingPpi.load());
             services.startupNotice = std::exchange(guard->recoveryNotice, ReaderNotice{});
             if (services.backButtonLabel.isEmpty())
                 services.backButtonLabel = strings::get("library.exit_to_library");

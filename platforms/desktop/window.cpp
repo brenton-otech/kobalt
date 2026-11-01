@@ -114,8 +114,9 @@ public:
     }
     QRect layoutScreen(int preset, bool landscape, QRect bounds) {
         libra = preset == 2;
-        QSize body = libra ? QSize(1708, 1902) : QSize(1323, 1890);
-        QRect screen = libra ? QRect(90, 111, 1264, 1680) : QRect(126, 150, 1072, 1448);
+        QSize body = libra ? QSize(1708, 1902) : preset == 3 ? QSize(800, 1680) : QSize(1323, 1890);
+        QRect screen = libra ? QRect(90, 111, 1264, 1680) : preset == 3 ? QRect(40, 40, 720, 1600) : QRect(126, 150, 1072, 1448);
+        landscape = landscape != (preset == 4);
         // Long, narrow buttons like the Libra's, centred in the grip.
         QRect previousBounds(1473, 640, 64, 300), nextBounds(1473, 980, 64, 300);
         if (landscape) {
@@ -221,7 +222,7 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     screenPicker = new QComboBox(toolbar);
     screenPicker->setObjectName("desktopScreenPicker");
     screenPicker->setAccessibleName(tr("Reader screen"));
-    screenPicker->addItems({tr("Fill window"), tr("6-inch e-reader"), tr("7-inch e-reader with buttons")});
+    screenPicker->addItems({tr("Fill window"), tr("6-inch e-reader"), tr("7-inch e-reader with buttons"), tr("Phone"), tr("6-inch landscape")});
     screenPicker->setCurrentIndex(screenPreset);
     screenPicker->setMinimumWidth(100);
     screenPicker->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -500,7 +501,7 @@ QString Window::saveScreenshot(const QString &directory, QString *error) {
 }
 QSize Window::pixels() const {
     if (screenPreset) {
-        QSize size = screenPreset == 1 ? QSize(1072, 1448) : QSize(1264, 1680);
+        QSize size = screenPreset == 2 ? QSize(1264, 1680) : screenPreset == 3 ? QSize(720, 1600) : screenPreset == 4 ? QSize(1448, 1072) : QSize(1072, 1448);
         if (rotateAction->isChecked())
             size.transpose();
         return size;

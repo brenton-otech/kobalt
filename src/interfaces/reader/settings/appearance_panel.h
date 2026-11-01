@@ -4,6 +4,7 @@
 #include "interfaces/reader/ui/controls/sliders.h"
 #include "header_footer_panel.h"
 #include "interfaces/reader/ui/controls/options.h"
+#include "interfaces/reader/ui/controls/rows.h"
 #include <QScrollArea>
 #include <QStackedWidget>
 #include <QVBoxLayout>
@@ -17,6 +18,7 @@ struct AppearanceLayout {
     QVBoxLayout *typeRows = nullptr, *pageRows = nullptr, *headerFooterRows = nullptr;
 };
 struct AppearancePanelInputs {
+    bool phone = false;
     bool sideButtons = false, reverseLandscapeButtons = false;
     bool automaticRotationAvailable = false;
     bool systemRotation = false;
@@ -33,7 +35,7 @@ public:
 private:
     QScrollArea *scroll;
 };
-class StripSizeControl final : public QWidget {
+class StripSizeControl final : public ui::ControlRow {
 public:
     StripSizeControl(QWidget *parent, bool footer);
     void setSize(int pixels, bool shown);
