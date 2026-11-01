@@ -347,6 +347,14 @@ struct Fixture {
     bool click(QWidget *target, QPoint position = QPoint(-1, -1)) {
         auto *reader = window.readerWindow();
         auto *canvas = window.findChild<QGraphicsView *>();
+        // A narrow Settings panel lists its sections, and an open section has
+        // a back cell in place of the close cell. Return to the list first.
+        if (reader && target && !target->isVisible() &&
+            (target->objectName() == "rrSettingsClose" ||
+             (target->parentWidget() && target->parentWidget()->objectName() == "rrSettingsRail"))) {
+            auto *back = reader->findChild<QPushButton *>("rrSettingsBack");
+            if (back && back->isVisible() && !click(back)) return false;
+        }
         if (!reader || !canvas || !target || !target->isVisible() || !target->isEnabled()) {
             return false;
         }
@@ -380,15 +388,20 @@ struct Fixture {
         auto *widget = reader ? reader->findChild<QWidget *>(name) : nullptr;
         return widget ? widget : window.findChild<QWidget *>(name);
     }
+    // Pages a sheet until its clip shows the whole target, as a person would.
     bool reveal(QWidget *target) {
         auto *reader = window.readerWindow();
         if (!reader || !target) return false;
-        if (auto *sheet = reader->findChild<QWidget *>("rrHeaderFooterView"); sheet && sheet->isVisible() && sheet->isAncestorOf(target)) {
-            auto *clip = sheet->findChild<QWidget *>("rrHeaderFooterClip");
-            const auto fits = [&] { return !clip || clip->rect().contains(QRect(target->mapTo(clip, QPoint()), target->size())); };
-            auto *previous = sheet->findChild<QPushButton *>("rrHeaderFooterPrevious");
-            auto *next = sheet->findChild<QPushButton *>("rrHeaderFooterNext");
-            if (clip && clip->isAncestorOf(target) && !fits()) {
+        const std::pair<const char *, const char *> pagers[] = {
+            {"rrHeaderFooterClip", "rrHeaderFooter"}, {"rrAppearanceClip", "rrAppearance"},
+            {"rrSettingsPageClip", "rrSettingsOptions"}};
+        for (const auto &[clipName, name] : pagers) {
+            auto *clip = reader->findChild<QWidget *>(clipName);
+            if (!clip || !clip->isVisible() || !clip->isAncestorOf(target)) continue;
+            const auto fits = [&] { return clip->rect().contains(QRect(target->mapTo(clip, QPoint()), target->size())); };
+            auto *previous = reader->findChild<QPushButton *>(QString(name) + "Previous");
+            auto *next = reader->findChild<QPushButton *>(QString(name) + "Next");
+            if (!fits()) {
                 while (previous && previous->isVisible() && previous->isEnabled())
                     if (!click(previous)) return false;
                 while (!fits() && next && next->isVisible() && next->isEnabled())
@@ -604,15 +617,20 @@ void variants() {
     }
 }
 
+// The phone in portrait and in landscape.
+bool phonePreset(int preset) {
+    return preset == 3 || preset == 5;
+}
+
 // Each screen has light and dark captures. E-reader profiles also support
-// 150% interface text; the phone profile supports normal text only.
+// 150% interface text; the phone profiles support normal text only.
 void screenshotVariants() {
     QTest::addColumn<int>("preset");
     QTest::addColumn<bool>("dark");
-    for (int preset : {1, 2, 3, 4}) {
+    for (int preset : {1, 2, 3, 4, 5}) {
         for (bool dark : {false, true})
             QTest::newRow(qPrintable(QString("%1-%2").arg(preset).arg(dark ? "dark" : "light"))) << preset << dark;
-        if (preset != 3) QTest::newRow(qPrintable(QString("%1-large").arg(preset))) << preset << false;
+        if (!phonePreset(preset)) QTest::newRow(qPrintable(QString("%1-large").arg(preset))) << preset << false;
     }
 }
 
@@ -621,11 +639,19 @@ QString screenshotTheme(bool dark) {
 }
 
 QSize screenshotSize(int preset) {
-    return preset == 2 ? QSize(1264, 1680) : preset == 3 ? QSize(720, 1600) : preset == 4 ? QSize(1448, 1072) : QSize(1072, 1448);
+    // The phone keeps its camera band outside the reader in landscape.
+    return preset == 2 ? QSize(1264, 1680) : preset == 3 ? QSize(720, 1600) : preset == 4 ? QSize(1448, 1072)
+         : preset == 5 ? QSize(1480, 720) : QSize(1072, 1448);
+}
+
+// The portrait phone keeps its 60-pixel camera band above the Library, as
+// Android keeps its status bar there.
+QSize librarySize(int preset) {
+    return screenshotSize(preset) - QSize(0, preset == 3 ? 60 : 0);
 }
 
 QString screenshotDevice(int preset) {
-    return QStringList{"fill", "six-inch", "seven-inch", "phone", "six-inch-landscape"}.at(preset);
+    return QStringList{"fill", "six-inch", "seven-inch", "phone", "six-inch-landscape", "phone-landscape"}.at(preset);
 }
 
 QString screenshotVariant(int preset, bool dark) {
@@ -677,7 +703,7 @@ bool writeCaptureRecord() {
 
 bool capture(Fixture &fixture, const QString &name, QWidget *nativeScreen = nullptr) {
     if (captureDirectory.isEmpty()) return true;
-    const auto parts = QRegularExpression("^(fill|six-inch|seven-inch|phone|six-inch-landscape)-(light|dark|large)-(.*)$").match(name);
+    const auto parts = QRegularExpression("^(fill|six-inch|seven-inch|phone|six-inch-landscape|phone-landscape)-(light|dark|large)-(.*)$").match(name);
     if (!parts.hasMatch()) return false;
     if (!captureOnly.isEmpty() && !captureOnly.contains(parts.captured(3))) return true;
     // Model state and visibility can settle before queued layouts and proxy
@@ -689,8 +715,13 @@ bool capture(Fixture &fixture, const QString &name, QWidget *nativeScreen = null
     if (!nativeScreen && start && start->libraryShown()) surface = start->library();
     const int preset = fixture.window.findChild<QComboBox *>("desktopScreenPicker")->currentIndex();
     const QSize expected = screenshotSize(preset);
-    if (!surface || !surface->isVisible() || (preset < 1 || preset > 4) ||
-        (surface->size() != expected && surface->size() != expected.transposed())) {
+    // A turned phone letterboxes its camera side, as the phone landscape profile does.
+    const QSize turned = preset == 3 ? screenshotSize(5) : expected.transposed();
+    // The phone's Library starts below the camera band, as it starts below
+    // Android's status bar. The capture shows the band in the Library's paper.
+    const int band = start && surface == start->library() ? expected.height() - surface->height() : 0;
+    if (!surface || !surface->isVisible() || (preset < 1 || preset > 5) || band < 0 || (band && preset != 3) ||
+        (surface->size() + QSize(0, band) != expected && surface->size() != turned)) {
         qCritical() << "Screenshot surface does not have the native reader dimensions:" << name;
         return false;
     }
@@ -703,11 +734,11 @@ bool capture(Fixture &fixture, const QString &name, QWidget *nativeScreen = null
             return false;
         }
     }
-    QImage pixels(surface->size(), QImage::Format_ARGB32_Premultiplied);
-    pixels.fill(Qt::transparent);
-    surface->render(&pixels);
+    QImage pixels(surface->size() + QSize(0, band), QImage::Format_ARGB32_Premultiplied);
+    pixels.fill(band ? surface->palette().color(QPalette::Window) : QColor(Qt::transparent));
+    surface->render(&pixels, QPoint(0, band));
     if (auto *button = surface->findChild<QPushButton *>("rrReturn")) {
-        if (button->isVisible() && QRegularExpression("^(six-inch|seven-inch|phone|six-inch-landscape)-(light|dark|large)-menu(-return-pressed)?$").match(name).hasMatch()) {
+        if (button->isVisible() && QRegularExpression("^(six-inch|seven-inch|phone|six-inch-landscape|phone-landscape)-(light|dark|large)-menu(-return-pressed)?$").match(name).hasMatch()) {
             auto *title = button->findChild<QLabel *>("rrReturnTitle");
             const auto at = button->mapTo(surface, QPoint());
             const auto rendered = pixels.copy(QRect(at, button->size()));
@@ -1163,7 +1194,8 @@ void tour(Fixture &fixture, const QString &name, bool screenshots) {
         QVERIFY(fixture.press("rrPage"));
     QTRY_VERIFY(fixture.visible("rrSettings"));
     QVERIFY(fixture.press("rrSettings"));
-    QTRY_VERIFY(fixture.visible("rrSettingsPages"));
+    // A narrow screen opens Settings on its section list.
+    QTRY_VERIFY(fixture.visible("rrSettingsPages") || fixture.visible("rrSettingsRail"));
     QVERIFY(scene("settings"));
     if (screenshots) {
         for (const auto *tab : {"Display", "Controls", "Defaults", "Styling", "System", "Kosync"}) {
@@ -1326,7 +1358,7 @@ void checkHeaderFooterSizes(int preset, bool dark) {
     using namespace headerfooter;
     Fixture fixture(dark);
     QVERIFY(fixture.prepared);
-    if (preset == 3) {
+    if (phonePreset(preset)) {
         auto preferences = storage::readJson(fixture.paths.preferences());
         preferences[headerfooter::presetKey] = "default";
         QVERIFY(storage::writeJson(fixture.paths.preferences(), preferences));
@@ -1345,6 +1377,7 @@ void checkHeaderFooterSizes(int preset, bool dark) {
     auto *header = static_cast<ui::SettingSlider *>(fixture.widget("rrHeaderTextSize"));
     auto *footer = static_cast<ui::SettingSlider *>(fixture.widget("rrFooterTextSize"));
     QVERIFY(header && footer && page);
+    // Captions stack above the controls on the narrow portrait phone only.
     if (preset == 3) {
         QVERIFY(fixture.reveal(header));
         QVERIFY(header->width() >= ui::px(400));
@@ -1537,7 +1570,11 @@ void checkPinnedBookmarks(int preset, bool dark) {
         input->setText(i == 0 ? "Map" : QString("Reference %1").arg(i + 1));
         const auto token = ui::bookmarkIconNames()[i];
         QVERIFY(!ui::controlIcon(ui::bookmarkIcon(token)).isNull());
-        QVERIFY(fixture.press(("rrPinIcon_" + token).toLatin1().constData()));
+        // A short screen shows fewer icons per page.
+        const auto iconName = ("rrPinIcon_" + token).toLatin1();
+        for (int turn = 0; turn < 4 && !fixture.visible(iconName.constData()); ++turn)
+            QVERIFY(fixture.press("rrPinIconsNext"));
+        QVERIFY(fixture.press(iconName.constData()));
         if (i == 0) QVERIFY(capture(fixture, name + "-pinned-bookmark-editor"));
         QVERIFY(fixture.press("rrPinSave"));
         QTRY_VERIFY(!fixture.visible("rrPinEditor"));
@@ -1555,8 +1592,15 @@ void checkPinnedBookmarks(int preset, bool dark) {
         auto *bar = fixture.widget("rrPinnedBookmarks");
         auto *first = fixture.widget("rrPinnedBookmark0");
         auto *last = fixture.widget(QString("rrPinnedBookmark%1").arg(i).toLatin1().constData());
-        QCOMPARE(first->y(), bar->height() - (last->y() + last->height()));
-        QCOMPARE(first->x(), last->x());
+        // A short screen fills a second column; the first column stays the tallest.
+        int lowest = 0;
+        for (int pin = 0; pin <= i; ++pin) {
+            const auto *button = fixture.widget(QString("rrPinnedBookmark%1").arg(pin).toLatin1().constData());
+            if (button->x() == first->x()) lowest = qMax(lowest, button->y() + button->height());
+        }
+        QCOMPARE(first->y(), bar->height() - lowest);
+        const int cell = first->width() + 2 * ui::px(12);
+        QVERIFY(last->x() >= first->x() && (last->x() - first->x()) % cell == 0 && last->x() + cell <= bar->width() + first->x());
         QCOMPARE(bar->geometry().right(), fixture.window.readerWindow()->width() - 1 - ui::px(20));
         if (i == 0) {
             QCOMPARE(first->accessibleName(), QString("Map"));
@@ -1667,10 +1711,13 @@ void checkPinnedBookmarks(int preset, bool dark) {
     auto *pinKeyboard = fixture.widget("rrPinEditor")->findChild<QWidget *>("widgetKeyboard");
     QVERIFY(pinKeyboard && !pinKeyboard->isVisible());
     QVERIFY(!fixture.widget("rrPinIconsPrevious")->isEnabled());
-    for (int iconPage = 2; iconPage <= 4; ++iconPage) {
+    // Four pages of twelve icons; a short screen shows six per page.
+    const int iconPages = preset == 5 ? 8 : 4;
+    for (int iconPage = 2; iconPage <= iconPages; ++iconPage) {
         QVERIFY(fixture.press("rrPinIconsNext"));
-        QTRY_COMPARE(qobject_cast<QLabel *>(fixture.widget("rrPinIconsPage"))->text(), QString("%1 of 4").arg(iconPage));
-        QVERIFY(capture(fixture, name + QString("-pinned-bookmark-icons-page%1").arg(iconPage)));
+        QTRY_COMPARE(qobject_cast<QLabel *>(fixture.widget("rrPinIconsPage"))->text(), QString("%1 of %2").arg(iconPage).arg(iconPages));
+        // Every profile has cards for pages 2 to 4; the short screen's later pages are only checked.
+        if (iconPage <= 4) QVERIFY(capture(fixture, name + QString("-pinned-bookmark-icons-page%1").arg(iconPage)));
     }
     QVERIFY(fixture.visible("rrPinIcon_diamond"));
     QVERIFY(!fixture.widget("rrPinIconsNext")->isEnabled());
@@ -1794,10 +1841,10 @@ printf '[{"file":"%s.png","scene":"%s"}]' "$3" "$KOBALT_GALLERY_CAPTURE" > "$2/p
         QVERIFY(directory.isValid());
         QJsonArray images;
         QMap<QString, QByteArray> originals;
-        for (const auto &device : {QString("six-inch"), QString("seven-inch"), QString("phone"), QString("six-inch-landscape")}) {
+        for (const auto &device : {QString("six-inch"), QString("seven-inch"), QString("phone"), QString("six-inch-landscape"), QString("phone-landscape")}) {
             for (const auto &theme : {QString("light"), QString("dark"), QString("large")}) {
-                if (device == "phone" && theme == "large") continue;
-                QImage image(screenshotSize(QStringList{"fill", "six-inch", "seven-inch", "phone", "six-inch-landscape"}.indexOf(device)), QImage::Format_RGB32);
+                if (device.startsWith("phone") && theme == "large") continue;
+                QImage image(screenshotSize(QStringList{"fill", "six-inch", "seven-inch", "phone", "six-inch-landscape", "phone-landscape"}.indexOf(device)), QImage::Format_RGB32);
                 image.fill(theme == "dark" ? Qt::black : Qt::white);
                 image.setDotsPerMeterX(11811);
                 image.setDotsPerMeterY(11811);
@@ -2222,7 +2269,7 @@ printf '[{"file":"%s.png","scene":"%s"}]' "$3" "$KOBALT_GALLERY_CAPTURE" > "$2/p
         start->showLibrary();
         auto *view = start->library();
         auto *canvas = start->libraryCanvas();
-        QTRY_VERIFY(view->isVisible() && view->size() == canvas->sceneRect().size().toSize() && view->width() > 600);
+        QTRY_VERIFY(view->isVisible() && view->geometry().bottomRight() + QPoint(1, 1) == canvas->sceneRect().bottomRight().toPoint() && view->width() > 600);
         auto *pages = view->findChild<QWidget *>("libraryPages");
         QVERIFY(pages);
         for (const char *mode : {"libraryViewGrid", "libraryViewList", "libraryViewHome"}) {
@@ -6422,7 +6469,8 @@ private slots:
         const auto name = screenshotVariant(preset, dark);
         auto *start = fixture.window.findChild<android::StartScreen *>();
         QTRY_VERIFY(start && start->libraryShown());
-        QTRY_COMPARE(start->library()->size(), screenshotSize(preset));
+        // The portrait phone keeps its 60-pixel camera band above the Library.
+        QTRY_COMPARE(start->library()->size(), librarySize(preset));
         QVERIFY(capture(fixture, name + "-library-home"));
         QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
         fixture.window.openBook(book);
@@ -6443,12 +6491,13 @@ private slots:
             return capture(fixture, name + '-' + suffix);
         };
         QVERIFY(scene("rrPage", "rrSettings", "menu"));
-        QCOMPARE(bool(fixture.widget("rrHeaderFooterPreset_phone")), preset == 3);
-        if (preset == 3) {
+        QCOMPARE(bool(fixture.widget("rrHeaderFooterPreset_phone")), phonePreset(preset));
+        if (phonePreset(preset)) {
             QCOMPARE(fixture.state().value("header_footer_preset").toString(), QString("phone"));
             QVERIFY(!page->chrome.header());
+            // Narrow screens show tab icons only; a phone in landscape has room for labels.
             for (const auto *tab : {"rrNavChapters", "rrNavSeek", "rrNavText", "rrNavLayout", "rrNavStats"})
-                QVERIFY(fixture.widget(tab)->property("labels_hidden").toBool());
+                QCOMPARE(fixture.widget(tab)->property("labels_hidden").toBool(), preset == 3);
         }
 
         QVERIFY(scene("rrNavChapters", "rrContents", "chapters"));
@@ -6512,6 +6561,9 @@ private slots:
         QCOMPARE(characterKey->font().pixelSize(), ui::px(48));
         auto *shift = keyboard->findChild<QPushButton *>("widgetKeyboardShift");
         QVERIFY(shift);
+        // A short screen settles the keyboard after the results above it reflow.
+        QSize settled;
+        QTRY_VERIFY(std::exchange(settled, shift->size()) == shift->size());
         const auto original = shift->grab().toImage();
         view->setDark(!dark);
         const auto inverted = shift->grab().toImage();
@@ -6528,11 +6580,11 @@ private slots:
                           ('-' + screenshotTheme(dark)) + "-widget-keyboard";
         QVERIFY(capture(fixture, name));
         {
-            const QSize expected = screenshotSize(preset);
+            const QSize expected = librarySize(preset);
             QCOMPARE(view->size(), expected);
             QVERIFY(capture(fixture, name + "-300ppi", view));
             const QImage native(captureDirectory + '/' + name + "-300ppi.png");
-            QCOMPARE(native.size(), expected);
+            QCOMPARE(native.size(), screenshotSize(preset));
             QCOMPARE(native.dotsPerMeterX(), qRound(300 / 0.0254));
             QCOMPARE(native.dotsPerMeterY(), qRound(300 / 0.0254));
             const auto family = ui::chromeFont().family();
@@ -6752,11 +6804,11 @@ private slots:
             languages.insert(language);
             for (const bool vertical : {false, true}) {
                 if (vertical && !QStringList{"ja", "ko", "zh-Hans", "zh-Hant"}.contains(language)) continue;
-                for (const int preset : {1, 2, 3, 4}) {
+                for (const int preset : {1, 2, 3, 4, 5}) {
                     const auto name = QString::number(preset) + '-' + language + (vertical ? "-vertical" : "");
                     for (const bool dark : {false, true})
                         QTest::newRow(qPrintable(name + (dark ? "-dark" : "-light"))) << entry << preset << vertical << dark;
-                    if (preset != 3) QTest::newRow(qPrintable(name + "-large")) << entry << preset << vertical << false;
+                    if (!phonePreset(preset)) QTest::newRow(qPrintable(name + "-large")) << entry << preset << vertical << false;
                 }
             }
         }
@@ -6826,11 +6878,11 @@ private slots:
         QTest::addColumn<int>("preset");
         QTest::addColumn<bool>("dark");
         for (const auto *publication : {"alice", "maths", "moby-dick"})
-            for (const int preset : {1, 2, 3, 4}) {
+            for (const int preset : {1, 2, 3, 4, 5}) {
                 const auto name = QString::number(preset) + '-' + QString(publication);
                 for (const bool dark : {false, true})
                     QTest::newRow(qPrintable(name + (dark ? "-dark" : "-light"))) << QString(publication) << preset << dark;
-                if (preset != 3) QTest::newRow(qPrintable(name + "-large")) << QString(publication) << preset << false;
+                if (!phonePreset(preset)) QTest::newRow(qPrintable(name + "-large")) << QString(publication) << preset << false;
             }
     }
     void typography_data() { screenshotVariants(); }
@@ -6902,7 +6954,7 @@ private slots:
                                   ui::metrics::chrome::cellIcon - ui::px(20);
             // Descriptions are written to fit one line at the standard size.
             // Larger text wraps them, and the row grows to fit.
-            if (largeTextVariant() || preset == 3)
+            if (largeTextVariant() || phonePreset(preset))
                 QVERIFY2(row->height() >= row->heightForWidth(row->width()), name);
             else
                 QVERIFY2(ui::wrappedInterfaceTextHeight(row->accessibleDescription(), font, textWidth) <
@@ -7177,7 +7229,13 @@ private slots:
         QVERIFY(fixture.press("rrLinkNext"));
         QVERIFY(capture(fixture, name + "-footnotes-page-2"));
         QVERIFY(fixture.press("rrLinkClose"));
-        const auto website = fixture.linkPoint(path, "website");
+        // A short screen can push the website link to the next page.
+        auto website = fixture.linkPoint(path, "website");
+        for (int turn = 0; turn < 3 && website.x() < 0; ++turn) {
+            fixture.window.readerWindow()->pageButton(1);
+            QTRY_VERIFY(!fixture.state().value("busy").toBool());
+            website = fixture.linkPoint(path, "website");
+        }
         QVERIFY(website.x() >= 0);
         QVERIFY(fixture.click(page, website));
         QTRY_VERIFY(fixture.visible("rrBrowserConfirmation"));
@@ -7194,7 +7252,7 @@ private slots:
         const auto name = device + ('-' + screenshotTheme(dark));
         // Onboarding is part of the Library and follows both themes.
         auto *start = fixture.window.findChild<android::StartScreen *>();
-        QTRY_VERIFY(start && start->library()->size() == screenshotSize(preset));
+        QTRY_VERIFY(start && start->library()->size() == librarySize(preset));
         QVERIFY(capture(fixture, name + "-library-empty"));
         QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
         fixture.window.openBook(book);
@@ -7244,7 +7302,8 @@ private slots:
             auto *start = fixture.window.findChild<android::StartScreen *>();
             auto *view = start->library();
             auto *canvas = start->libraryCanvas();
-            QTRY_VERIFY(view->isVisible() && view->size() == canvas->sceneRect().size().toSize() &&
+            // The portrait phone's Library starts below its camera band.
+            QTRY_VERIFY(view->isVisible() && view->geometry().bottomRight() + QPoint(1, 1) == canvas->sceneRect().bottomRight().toPoint() &&
                         view->width() > 600);
             view->findChild<QPushButton *>("libraryMore")->click();
             view->findChild<QPushButton *>("libraryMoreFolders")->click();
@@ -7261,7 +7320,8 @@ private slots:
             auto *view = start->library();
             // The preset applies on a short timer; wait until the library has the reader's size.
             auto *canvas = start->libraryCanvas();
-            QTRY_VERIFY(view->isVisible() && view->size() == canvas->sceneRect().size().toSize() &&
+            // The portrait phone's Library starts below its camera band.
+            QTRY_VERIFY(view->isVisible() && view->geometry().bottomRight() + QPoint(1, 1) == canvas->sceneRect().bottomRight().toPoint() &&
                         view->width() > 600);
             // The library opens as a cover grid.
             QVERIFY(capture(fixture, name + (reading ? "-grid" : "-grid-new")));
@@ -7503,7 +7563,7 @@ int main(int argc, char **argv) {
     // full gallery's manifest tells which cases capture them.
     const auto selectedScenes = qEnvironmentVariable("KOBALT_GALLERY_SCENE").split(',', Qt::SkipEmptyParts);
     QMap<QString, QStringList> selection;
-    int expectedScreenshots = lightGallery ? 154 : 1352;
+    int expectedScreenshots = lightGallery ? 182 : 3050;
     if (screenshots) {
         if ((arguments.size() != 3 && !lightGallery) || !QDir::isAbsolutePath(arguments.at(2))) {
             qCritical() << "Usage: kobalt-desktop-tests --screenshots ABSOLUTE_DIRECTORY [--light]";

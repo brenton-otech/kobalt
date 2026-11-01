@@ -42,7 +42,9 @@ public:
     // By default the library fills its canvas at the display's pixel ratio,
     // as on Android. A host that scales the reader itself, like the desktop
     // app, gives the library the same reader size and scale.
-    void setLibraryScale(QSize pixels, qreal scale, bool nativePixels, qreal rasterScale);
+    // `topInset` keeps the library below a band the host shows instead, such
+    // as a simulated status bar.
+    void setLibraryScale(QSize pixels, qreal scale, bool nativePixels, qreal rasterScale, int topInset = 0);
     // An opening error for a book chosen in the library, shown over the library.
     void showLibraryError(const QString &error);
     // On Android a book opened from the library on its own is Kobalt's copy,
@@ -77,6 +79,7 @@ private:
         QSize pixels;
         qreal scale = 1, rasterScale = 1;
         bool nativePixels = false;
+        int topInset = 0;
     } scale;
     void buildLibrary();
     void fitLibrary();

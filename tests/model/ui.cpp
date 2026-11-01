@@ -1941,7 +1941,9 @@ int main(int argc, char **argv) {
         for (const int ppi : {167, 212, 300}) {
             setDensity(ppi);
             QWidget host;
-            host.resize(600, metrics::control::stepSize);
+            // Wide enough for a side caption at every density; narrower rows
+            // stack their caption above the controls and grow taller.
+            host.resize(900, metrics::control::stepSize);
             auto *rows = new QVBoxLayout(&host);
             rows->setContentsMargins(0, 0, 0, 0);
             auto *slider =

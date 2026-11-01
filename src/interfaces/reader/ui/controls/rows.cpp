@@ -11,6 +11,7 @@
 #include <QGridLayout>
 #include "text.h"
 #include <QVariant>
+#include <utility>
 
 namespace kobalt::ui {
 namespace m = metrics;
@@ -444,6 +445,10 @@ public:
     explicit ControlGrid(ControlRow *row) : QGridLayout(row), row(row) {}
     bool hasHeightForWidth() const override { return true; }
     int heightForWidth(int width) const override { return row->heightForWidth(width); }
+    void setGeometry(const QRect &bounds) override {
+        row->fitWidth(bounds.width());
+        QGridLayout::setGeometry(bounds);
+    }
 private:
     ControlRow *row;
 };
@@ -459,14 +464,14 @@ ControlRow::ControlRow(QWidget *parent) : QWidget(parent) {
     auto policy = sizePolicy();
     policy.setHeightForWidth(true);
     setSizePolicy(policy);
-    arrange();
+    arrange(width());
 }
 void ControlRow::setMarkerBand(int height) {
     markerBand = height;
-    arrange();
+    arrange(width());
 }
 int ControlRow::heightForWidth(int width) const {
-    const bool compact = width < m::control::captionWidth + px(480) + m::control::itemGap;
+    const bool compact = stackedAt(width);
     const int captionWidth = compact ? width : int(m::control::captionWidth);
     const auto measure = [](QLayout *layout, int width) {
         return !layout ? 0 : layout->hasHeightForWidth() ? layout->totalHeightForWidth(qMax(1, width)) : layout->sizeHint().height();
@@ -484,10 +489,19 @@ QSize ControlRow::sizeHint() const {
 QSize ControlRow::minimumSizeHint() const {
     return {0, heightForWidth(width())};
 }
-void ControlRow::resizeEvent(QResizeEvent *) { arrange(); }
-void ControlRow::arrange() {
-    stacked = width() < m::control::captionWidth + px(480) + m::control::itemGap;
+bool ControlRow::stackedAt(int width) {
+    return width < m::control::captionWidth + px(480) + m::control::itemGap;
+}
+void ControlRow::fitWidth(int width) {
+    if (stackedAt(width) != stacked)
+        arrange(width);
+}
+void ControlRow::resizeEvent(QResizeEvent *) { arrange(width()); }
+void ControlRow::arrange(int width) {
+    const bool wasStacked = std::exchange(stacked, stackedAt(width));
     setProperty("caption_stacked", stacked);
+    if (stacked != wasStacked && stackedChanged)
+        stackedChanged(stacked);
     captionArea->setMinimumWidth(stacked ? 0 : int(m::control::captionWidth));
     captionArea->setMaximumWidth(stacked ? QWIDGETSIZE_MAX : int(m::control::captionWidth));
     if (auto *rows = captionArea->layout()) {
@@ -503,6 +517,13 @@ void ControlRow::arrange() {
     grid->setColumnStretch(0, stacked ? 1 : 0);
     grid->setColumnStretch(1, stacked ? 0 : 1);
     updateGeometry();
+}
+ControlRow *controlRowOf(QWidget *control) {
+    for (auto *widget = control; widget; widget = widget->parentWidget())
+        if (auto *row = dynamic_cast<ControlRow *>(widget))
+            return row;
+    Q_ASSERT(false);
+    return nullptr;
 }
 QHBoxLayout *labeledRow(QWidget *parent, QVBoxLayout *rows, const QString &label, const QString &detail, const QString &detailName) {
     auto *row = new ControlRow(parent);

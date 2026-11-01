@@ -17,9 +17,11 @@ for (const shot of manifest.images) {
         assert.equal(shot.book.sha256, manifest.book_sha256);
         assert.equal(shot.book.fixture, undefined);
     }
-    const expected = { 'six-inch': [1072, 1448], 'seven-inch': [1264, 1680], phone: [720, 1600], 'six-inch-landscape': [1072, 1448] }[shot.device];
+    const expected = { 'six-inch': [1072, 1448], 'seven-inch': [1264, 1680], phone: [720, 1600], 'six-inch-landscape': [1072, 1448], 'phone-landscape': [720, 1480] }[shot.device];
     assert.ok(expected);
-    assert.deepEqual([shot.width, shot.height].sort((a, b) => a - b), expected);
+    // Scenes that turn the phone capture it letterboxed, as the phone landscape profile does.
+    const turnedPhone = shot.device === 'phone' && shot.width === 1480 && shot.height === 720;
+    assert.deepEqual([shot.width, shot.height].sort((a, b) => a - b), turnedPhone ? [720, 1480] : expected);
     const variants = scenes.get(shot.screen) || new Map();
     const key = `${shot.device}/${shot.theme}`;
     const pages = variants.get(key) || new Set();
@@ -43,13 +45,13 @@ for (const shot of manifest.images) {
     assert.deepEqual(density, [11811, 11811]);
 }
 for (const variants of scenes.values()) {
-    assert.deepEqual([...variants.keys()].sort(), ['six-inch', 'seven-inch', 'phone', 'six-inch-landscape'].flatMap(device => (device === 'phone' ? ['dark', 'light'] : ['dark', 'large', 'light']).map(theme => `${device}/${theme}`)).sort());
-    for (const device of ['six-inch', 'seven-inch', 'phone', 'six-inch-landscape']) {
+    assert.deepEqual([...variants.keys()].sort(), ['six-inch', 'seven-inch', 'phone', 'six-inch-landscape', 'phone-landscape'].flatMap(device => (device.startsWith('phone') ? ['dark', 'light'] : ['dark', 'large', 'light']).map(theme => `${device}/${theme}`)).sort());
+    for (const device of ['six-inch', 'seven-inch', 'phone', 'six-inch-landscape', 'phone-landscape']) {
         const pages = [...variants.get(device + '/light')].sort((a, b) => a - b);
         assert.deepEqual([...variants.get(device + '/dark')].sort((a, b) => a - b), pages);
         assert.deepEqual(pages, Array.from({ length: pages.length }, (_, index) => index + 1));
         // Larger text can add pages; they must still be complete.
-        if (device === 'phone') continue;
+        if (device.startsWith('phone')) continue;
         const large = [...variants.get(device + '/large')].sort((a, b) => a - b);
         assert.deepEqual(large, Array.from({ length: large.length }, (_, index) => index + 1));
     }
@@ -132,11 +134,11 @@ try {
     assert.equal(await page.locator('#viewer-model').textContent(), 'Kobo Libra · 7-inch');
     assert.equal(await page.locator('#frame-buttons').isVisible(), true);
     await checkLayout();
-    for (const [device, dimensions] of [['phone', [720, 1600]], ['six-inch-landscape', [1448, 1072]]]) {
+    for (const [device, dimensions] of [['phone', [720, 1600]], ['six-inch-landscape', [1448, 1072]], ['phone-landscape', [1480, 720]]]) {
         await page.locator('#viewer-device').selectOption(device);
         await page.locator('#image').evaluate(image => image.decode());
         assert.deepEqual(await page.locator('#image').evaluate(image => [image.naturalWidth, image.naturalHeight]), dimensions);
-        assert.equal(await page.locator('#text-size').isDisabled(), device === 'phone');
+        assert.equal(await page.locator('#text-size').isDisabled(), device.startsWith('phone'));
         await checkLayout();
     }
     await page.locator('#viewer-device-bottom').selectOption('six-inch');

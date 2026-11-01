@@ -163,7 +163,9 @@ void DictionaryPanel::place(const QRect &selection) {
     // The sheet takes the half without the word and meets the page with its rule.
     lower = !editing && selection.center().y() < size.height() / 2;
     setEdges(lower ? Qt::TopEdge : Qt::BottomEdge);
-    setGeometry(0, lower ? size.height() - h : 0, size.width(), h);
+    // At the top, the sheet starts below a camera band.
+    const int safeTop = lower ? 0 : parentWidget()->property("reader_safe_top").toInt();
+    setGeometry(0, lower ? size.height() - h : safeTop, size.width(), h);
     arrange();
 }
 QString DictionaryPanel::formatDefinition(const QString &html) {

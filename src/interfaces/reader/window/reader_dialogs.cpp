@@ -693,18 +693,23 @@ void Reader::syncPinnedBookmarks() {
     const int top = topControls->geometry().bottom() + 1;
     const int bottom = bottomControls->isVisible() ? bottomControls->y() : height();
     const int room = qMax(1, bottom - top);
-    const int cell = qMax(1, qMin<int>(m::chrome::actionHeight,
-        (room - 2 * padding) / BookmarkStore::maxPins));
+    // A short screen, such as a phone in landscape, cannot stack every
+    // shortcut at a usable size. The tray fills a second column there.
+    const int columns = (room - 2 * padding) / BookmarkStore::maxPins < m::chrome::actionHeight * 3 / 4 ? 2 : 1;
+    const int columnRows = (BookmarkStore::maxPins + columns - 1) / columns;
+    const int cell = qMax(1, qMin<int>(m::chrome::actionHeight, (room - 2 * padding) / columnRows));
     const int side = qMax(1, cell - 2 * padding);
-    const int trayHeight = cell * pins.size() + 2 * padding;
-    pinnedBookmarks->setGeometry(width() - cell - edgeGap, top + (room - trayHeight) / 2,
-                                 cell, trayHeight);
+    const int rows = qMin<int>(pins.size(), columnRows);
+    const int used = (pins.size() + columnRows - 1) / columnRows;
+    const int trayHeight = cell * rows + 2 * padding;
+    pinnedBookmarks->setGeometry(width() - cell * used - edgeGap, top + (room - trayHeight) / 2,
+                                 cell * used, trayHeight);
     for (int i = 0; i < pinnedButtons.size(); ++i) {
         auto *button = pinnedButtons[i];
         button->setVisible(i < pins.size());
         if (i >= pins.size()) continue;
         const auto &pin = pins[i];
-        button->setGeometry(padding, padding + i * cell + (cell - side) / 2, side, side);
+        button->setGeometry(padding + i / columnRows * cell, padding + i % columnRows * cell + (cell - side) / 2, side, side);
         button->setGlyph(ui::bookmarkIcon(pin.icon));
         const auto name = pin.name.isEmpty() ? pin.chapter : pin.name;
         button->setAccessibleName(name);

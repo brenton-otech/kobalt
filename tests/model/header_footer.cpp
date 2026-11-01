@@ -16,6 +16,8 @@ int main() {
     require(isPhoneScreen({720, 1600}, 300) && isPhoneScreen({1600, 720}, 300), "Phone detection changed with rotation");
     require(isPhoneScreen({1080, 2400}, 450), "Phone detection ignored density");
     require(!isPhoneScreen({1072, 1448}, 300) && !isPhoneScreen({1448, 1072}, 300), "Six-inch reader detected as a phone");
+    require(isPhoneScreen({824, 1648}, 300), "BOOX Palma not detected as a phone");
+    require(!isPhoneScreen({758, 1024}, 212), "Six-inch 212 PPI reader detected as a phone");
     const auto phone = select({}, true);
     require(phone.preset == Preset::Phone && !phone.layout.header() && phone.layout.footer(), "Phone default did not remove the header");
     require(select(qt::object({{presetKey, "default"}}), true).layout == standard, "Phone default replaced an explicit Kobalt preset");

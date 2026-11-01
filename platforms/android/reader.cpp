@@ -160,7 +160,13 @@ void ReaderController::begin(const QString &path, QSize pixels) {
     saved["bold_reading"] = settings.value("bold_reading").toString("off");
     saved["avoid_wasteful_styling"] = settings.value("avoid_wasteful_styling").toBool(true);
     orientation.configure(settings);
-    const auto viewport = readerInterface().readingViewport(pixels, settings);
+    // The first layout leaves out the cutout bands, as the reader window does.
+    QSize body = pixels;
+    if (const auto safeArea = services().safeArea) {
+        const auto safe = safeArea(pixels);
+        body.rheight() -= safe.top + safe.bottom;
+    }
+    const auto viewport = readerInterface().readingViewport(body, settings);
     opening = std::make_unique<ReaderSession>(fonts, placeholder);
     QPointer<ReaderController> guard(this);
     OpenRequest request{identity, path, viewport, saved, {}, paths.layoutCache(), lease, source->resources(lease)};

@@ -9,15 +9,23 @@ namespace kobalt {
 // the interface keeps its own copy for UI sizes.
 inline std::atomic<int> readingPpi{300};
 
-// A narrow, elongated screen uses the phone layout in either orientation.
-// The short edge is at most three inches; six-inch e-readers stay wider.
+// A screen whose short edge is under 3.4 inches uses the phone layout in
+// either orientation. Phones and the BOOX Palma (2.75 inches) do; the six-inch
+// Kobo Clara (3.57 inches) and larger e-readers do not.
 inline bool isPhoneScreen(QSize screen, int ppi) {
     const int narrow = qMin(screen.width(), screen.height());
-    const int longEdge = qMax(screen.width(), screen.height());
-    return ppi > 0 && narrow > 0 && qint64(narrow) * 300 <= qint64(ppi) * 900 &&
-           qint64(longEdge) * 5 >= qint64(narrow) * 8;
+    return ppi > 0 && narrow > 0 && qint64(narrow) * 100 < qint64(ppi) * 340;
 }
 
+// The current window is narrower, or shorter, than a six-inch e-reader's
+// short edge. Unlike isPhoneScreen, these follow the orientation: a phone in
+// landscape is short but not narrow.
+inline bool isNarrowWidth(int width, int ppi) {
+    return ppi > 0 && qint64(width) * 100 < qint64(ppi) * 340;
+}
+inline bool isShortHeight(int height, int ppi) {
+    return isNarrowWidth(height, ppi);
+}
 
 // Reading sizes are designed at 300 ppi, like the UI, and keep their physical
 // size on other screens.

@@ -1187,6 +1187,10 @@ void Reader::buildSettings() {
     general = settings;
     kosyncPage = settings->kosync;
     buildKosync();
+    settings->refitRequested = [this] {
+        fitSettings();
+        refresh();
+    };
     connect(settings->closeButton, &QPushButton::clicked, this, [this] {
         if (appearanceEdit.applying())
             return;

@@ -192,7 +192,13 @@ public:
         if (!panel || !panel->parentWidget())
             return;
         const auto bounds = panel->parentWidget()->rect();
-        const int height = qMin(bounds.height() / 2, qMax(220, bounds.height() / 3));
+        // A third of the screen, but at least four rows of keys as tall as
+        // their 48-pixel labels with padding and border, about 80 pixels, and
+        // the gaps between them. Shorter keys clip their labels and grow back
+        // when restyled; this matters on a short screen.
+        const auto margins = panel->layout()->contentsMargins();
+        const int keyRows = 4 * px(80) + 3 * panel->layout()->spacing() + margins.top() + margins.bottom();
+        const int height = qMin(bounds.height() / 2, qMax(qMax(220, bounds.height() / 3), keyRows));
         const bool resized = panel->size() != QSize(bounds.width(), height);
         if (resized) closeAccents();
         panel->setGeometry(0, bounds.height() - height, bounds.width(), height);
