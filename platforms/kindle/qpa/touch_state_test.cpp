@@ -80,5 +80,29 @@ int main()
     check(!gate.deliver(true) && !gate.deliver(false), "Sleeping tap was delivered");
     gate.setBlocked(false, false);
     check(gate.deliver(true), "Completed sleeping tap blocked the next awake contact");
+    kindle::TouchState legacy;
+    legacy.tracking(1);
+    check(!legacy.hasPosition(), "Unknown legacy slot coordinates were accepted");
+    legacy.position(true, 100);
+    check(!legacy.hasPosition(), "One legacy coordinate was accepted as a complete position");
+    check(!legacy.frameReady(), "Unknown legacy press was allowed through");
+    legacy.frameSent(false);
+    check(!legacy.sentDown, "Suppressed legacy contact was recorded as a delivered press");
+    legacy.position(false, 200);
+    check(legacy.hasPosition(), "Legacy slot did not learn both coordinates");
+    check(!legacy.frameReady(), "Suppressed legacy contact restarted partway through a gesture");
+    legacy.tracking(-1);
+    legacy.frameSent(false);
+    legacy.tracking(2);
+    check(legacy.hasPosition() && legacy.frameReady() && legacy.x == 100 && legacy.y == 200,
+          "A reused legacy slot lost its observed coordinates");
+    legacy.frameSent();
+    check(legacy.sentDown, "Known legacy contact could not be delivered");
+    legacy.invalidatePositions();
+    check(!legacy.hasPosition(), "Dropped legacy events retained stale coordinate validity");
+    legacy.position(false, 300);
+    check(!legacy.hasPosition(), "Legacy recovery accepted an unobserved axis");
+    legacy.position(true, 400);
+    check(legacy.hasPosition(), "Legacy recovery failed to learn fresh coordinates");
     return 0;
 }

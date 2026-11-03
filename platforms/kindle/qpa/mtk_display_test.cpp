@@ -92,7 +92,8 @@ int main(int argc, char **argv) {
           epdcFull.region.width == 1072 && epdcFull.region.height == 1448 &&
           epdcFull.waveform_mode == 2 && epdcFull.update_mode == 1 &&
           epdcFull.update_marker == 101 && epdcFull.temp == 0x1000 &&
-          epdcFull.flags == 0, "EPDC full update ABI incorrect");
+          epdcFull.flags == 0 && epdcFull.hist_bw_waveform_mode == 1 &&
+          epdcFull.hist_gray_waveform_mode == 3, "EPDC full update ABI incorrect");
 
     const auto epdcPartial = makeEpdcUpdate(QRect(8, 16, 64, 32), false, 102);
     check(epdcPartial.waveform_mode == 0x101 && epdcPartial.update_mode == 0 &&

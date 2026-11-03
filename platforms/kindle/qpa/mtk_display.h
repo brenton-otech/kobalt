@@ -26,7 +26,10 @@ static_assert(sizeof(Completion) == 8);
 constexpr unsigned long sendUpdate = 0x4060462e;
 constexpr unsigned long waitComplete = 0xc008462f;
 
-// Freescale / NXP i.MX6 EPDC ABI for Kindle PW1/PW2/PW3 (mxc_epdc_fb).
+// Freescale / NXP i.MX6 EPDC ABI for Kindle PW3 (mxc_epdc_fb).
+// Independently declared from include/linux/mxcfb.h in Amazon's PW3
+// firmware 5.13.5 source. Histogram fields precede temperature.
+// https://s3.amazonaws.com/kindledownloads/Kindle_src_5.13.5_3716750030.tar.gz
 // All fields are 32 bits on ARM.
 struct EpdcRect { uint32_t top, left, width, height; };
 struct EpdcAltBufferData {
@@ -40,13 +43,15 @@ struct EpdcUpdate {
     uint32_t waveform_mode;
     uint32_t update_mode;
     uint32_t update_marker;
+    uint32_t hist_bw_waveform_mode;
+    uint32_t hist_gray_waveform_mode;
     int32_t temp;
     uint32_t flags;
-    int32_t dither_mode;
-    int32_t quant_bit;
     EpdcAltBufferData alt;
 };
-static_assert(sizeof(EpdcUpdate) == 72);
+static_assert(sizeof(EpdcUpdate) == 72 && offsetof(EpdcUpdate, hist_bw_waveform_mode) == 28 &&
+              offsetof(EpdcUpdate, hist_gray_waveform_mode) == 32 && offsetof(EpdcUpdate, temp) == 36 &&
+              offsetof(EpdcUpdate, flags) == 40 && offsetof(EpdcUpdate, alt) == 44);
 constexpr unsigned long epdcSendUpdate = 0x4048462e;
 
 enum class ControllerType {

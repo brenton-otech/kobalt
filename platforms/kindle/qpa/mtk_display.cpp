@@ -126,10 +126,10 @@ EpdcUpdate makeEpdcUpdate(const QRect &area, bool full, uint32_t marker) {
     update.waveform_mode = full ? 2 : 0x101; // GC16 or AUTO
     update.update_mode = full ? 1 : 0;
     update.update_marker = marker;
+    update.hist_bw_waveform_mode = 1; // DU for AUTO's black/white histogram
+    update.hist_gray_waveform_mode = 3; // GC16_FAST for AUTO's gray histogram
     update.temp = 0x1000; // TEMP_USE_AMBIENT
     update.flags = 0;
-    update.dither_mode = 0;
-    update.quant_bit = 0;
     return update;
 }
 Display::Display() = default;

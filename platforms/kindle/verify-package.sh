@@ -14,8 +14,10 @@ glibc_compatible() {
 }
 
 glibc_library() {
+    local loader=${interpreter:-/lib/ld-linux-armhf.so.3}
     case "$1" in
-        libc.so.6|libm.so.6|libdl.so.2|libpthread.so.0|librt.so.1|libutil.so.1|libresolv.so.2|libnsl.so.1|libanl.so.1|libcrypt.so.1|ld-linux-armhf.so.3) return 0 ;;
+        libc.so.6|libm.so.6|libdl.so.2|libpthread.so.0|librt.so.1|libutil.so.1|libresolv.so.2|libnsl.so.1|libanl.so.1|libcrypt.so.1) return 0 ;;
+        "${loader##*/}") return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -31,38 +33,49 @@ if [[ "${1:-}" == --self-test && $# == 1 ]]; then
     done
     glibc_library libc.so.6 || fail 'libc whitelist'
     if glibc_library libatomic.so.1; then fail 'libatomic must be packaged'; fi
+    for interpreter in /lib/ld-linux-armhf.so.3 /lib/ld-linux.so.3; do
+        glibc_library "${interpreter##*/}" || fail 'selected loader missing from whitelist'
+        other=ld-linux.so.3
+        [[ "$interpreter" != /lib/ld-linux.so.3 ]] || other=ld-linux-armhf.so.3
+        if glibc_library "$other"; then fail 'opposite loader accepted'; fi
+    done
     echo 'Kindle package audit parser checks passed.'
     exit 0
 fi
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
-export DOCKER_CONFIG=${DOCKER_CONFIG:-"$root/build/kindle-sdk/docker-config"}
+source "$root/platforms/kindle/target.sh"
+if [[ "${1:-}" == --inside ]]; then
+    [[ $# == 2 && "$root" == /work ]] || fail 'invalid inside invocation'
+    kindle_target "$2"
+else
+    [[ $# -le 1 ]] || fail 'Usage: bash platforms/kindle/verify-package.sh [pw5|pw3|--self-test]'
+    kindle_target "${1:-pw5}"
+fi
+export DOCKER_CONFIG=${DOCKER_CONFIG:-"$root/build/$fixture/docker-config"}
 mkdir -p "$DOCKER_CONFIG"
-if [[ $# == 0 ]]; then
-    [[ -f "$root/build/kindle/package/kobalt/bin/kobalt" ]] || fail 'build/package the ARM app first'
+if [[ "${1:-}" != --inside ]]; then
+    [[ -f "$root/build/$output/package/kobalt/bin/kobalt" ]] || fail 'build/package the selected ARM app first'
     image=$(bash "$root/platforms/kindle/sdk/prepare-runtime-image.sh")
     exec docker run --rm --pull=never --init \
         --label kobalt.purpose=kindle-userspace-check \
-        -v "$root:/work" -v "$root/build/kindle-sdk:/fixture" \
-        --workdir /work "$image" bash /work/platforms/kindle/verify-package.sh --inside
+        -v "$root:/work" -v "$root/build/$fixture:/fixture" \
+        --workdir /work "$image" bash /work/platforms/kindle/verify-package.sh --inside "$target"
 fi
-[[ $# == 1 && "$1" == --inside && "$root" == /work ]] || {
-    echo 'Usage: bash platforms/kindle/verify-package.sh [--self-test]' >&2
-    exit 2
-}
-
-exec 9>/work/build/kindle/application.lock
+build=/work/build/$output
+exec 9>"$build/application.lock"
 flock -n 9 || fail 'the Kindle output is already in use'
 exec 8>/fixture/firmware-runtime.lock
 flock -n 8 || fail 'the stock runtime fixture is being prepared'
-app=/work/build/kindle/package/kobalt
+app=$build/package/kobalt
 sysroot=/fixture/firmware-runtime
 readelf=/usr/bin/readelf
 [[ -x "$readelf" ]] || fail 'SDK readelf missing'
-[[ -f "$sysroot/firmware.sha256" && $(cat "$sysroot/firmware.sha256") == \
-    64ddcbae52f0009b5d3f9974d93610db7f26a8787c895c55f413127af474b987 ]] \
+[[ -f "$sysroot/firmware.sha256" && $(cat "$sysroot/firmware.sha256") == "$firmware_sha" ]] \
     || fail 'prepare the stock runtime first: bash platforms/kindle/sdk/prepare-runtime.sh'
 (cd "$sysroot" && sha256sum --check --status files.sha256) || fail 'stock runtime checksum mismatch'
+[[ $(cat "$app/launcher/runtime-target") == "$target" ]] || fail 'packaged runtime target mismatch'
+sh "$app/launcher/check-runtime.sh" "$app" "$sysroot" || fail 'runtime preflight rejected the stock fixture'
 for binary in "$app/bin/kobalt" "$app/plugins/platforms/libqkindle.so"; do
     "$readelf" --file-header "$binary" >/dev/null || fail "missing or invalid ELF: $binary"
 done
@@ -75,7 +88,7 @@ while IFS= read -r -d '' binary; do
     grep -Eq 'Class:[[:space:]]+ELF32' <<<"$header" || fail "not ELF32: $binary"
     grep -Eq 'Machine:[[:space:]]+ARM[[:space:]]*$' <<<"$header" || fail "not ARM: $binary"
     grep -Eq 'Data:.*little endian' <<<"$header" || fail "not little endian: $binary"
-    grep -q 'hard-float ABI' <<<"$header" || fail "not hard-float ABI: $binary"
+    grep -q "$abi ABI" <<<"$header" || fail "not $abi ABI: $binary"
     dynamic=$("$readelf" --dynamic --wide "$binary")
     while IFS= read -r needed; do
         [[ -n "$needed" ]] || continue
@@ -85,24 +98,29 @@ while IFS= read -r -d '' binary; do
             fail "glibc dependency $needed absent from target sysroot"
         fi
     done < <(sed -n 's/.*(NEEDED).*\[\([^]]*\)\].*/\1/p' <<<"$dynamic")
+    program_headers=$("$readelf" --program-headers --wide "$binary")
+    if grep -q 'Requesting program interpreter:' <<<"$program_headers"; then
+        grep -Fq "[Requesting program interpreter: $interpreter]" <<<"$program_headers" \
+            || fail "unexpected executable interpreter: $binary"
+    fi
     versions=$("$readelf" --version-info --wide "$binary")
     while IFS= read -r version; do
         glibc_compatible "$version" || fail "GLIBC_$version exceeds target baseline 2.20: $binary"
     done < <(awk '{ for (i = 1; i < NF; ++i) if ($i == "Name:" && $(i + 1) ~ /^GLIBC_/) {
         version = $(i + 1); sub(/^GLIBC_/, "", version); print version;
     }}' <<<"$versions" | sort -u)
-done < <(find "$app/bin" "$app/lib" "$app/plugins" -type f -print0)
+done < <(find "$app/bin" "$app/lib" "$app/plugins" "$build/sdk-platforms" -type f -print0)
 
 program_headers=$("$readelf" --program-headers --wide "$app/bin/kobalt")
-grep -Fq '[Requesting program interpreter: /lib/ld-linux-armhf.so.3]' <<<"$program_headers" \
+grep -Fq "[Requesting program interpreter: $interpreter]" <<<"$program_headers" \
     || fail 'unexpected executable interpreter'
-echo "ARM ELF audit passed: $count objects, dependency closure, hard-float ABI, GLIBC <= 2.20."
-bash /work/platforms/kindle/power-bridge-test.sh /work/build/kindle/test-tmp
+echo "ARM ELF audit passed: $count objects, dependency closure, $abi ABI, GLIBC <= 2.20 ($target)."
+bash /work/platforms/kindle/power-bridge-test.sh "$build/test-tmp"
 
 # The SDK offscreen plugin uses the same FreeType database as the device QPA.
 # qemu-user executes ARM userspace; it does not emulate a Kindle kernel or EPDC.
-[[ -f /work/build/kindle/sdk-platforms/libqoffscreen.so ]] || fail 'matching SDK offscreen plugin missing; rebuild the application'
-mkdir -p /work/build/kindle/test-tmp
+[[ -f "$build/sdk-platforms/libqoffscreen.so" ]] || fail 'matching SDK offscreen plugin missing; rebuild the application'
+mkdir -p "$build/test-tmp"
 profile=$(mktemp -d /tmp/arm-smoke.XXXXXX)
 cleanup() { rm -rf "$profile"; }
 trap cleanup EXIT
@@ -111,13 +129,14 @@ trap 'exit 143' TERM
 mkdir -p "$profile/tmp" "$profile/runtime"
 chmod 700 "$profile/runtime"
 cp -r "$app/assets" "$profile/assets"
-log=/work/build/kindle/arm-smoke.log
+log=$build/arm-smoke.log
 result=0
 ulimit -c 0
-timeout --signal=TERM --kill-after=10s 180s qemu-arm -cpu cortex-a7 -L "$sysroot" \
+timeout --signal=TERM --kill-after=10s 180s qemu-arm -cpu "$qemu_cpu" -L "$sysroot" \
     -E "LD_LIBRARY_PATH=$app/lib" \
     -E QT_QPA_PLATFORM=offscreen \
-    -E QT_QPA_PLATFORM_PLUGIN_PATH=/work/build/kindle/sdk-platforms \
+    -E KOBALT_STRICT_MAIN_THREAD=1 \
+    -E "QT_QPA_PLATFORM_PLUGIN_PATH=$build/sdk-platforms" \
     -E "QT_PLUGIN_PATH=$app/plugins" \
     -E "QT_QPA_FONTDIR=$profile/assets/fonts" \
     -E "TMPDIR=$profile/tmp" \
@@ -126,7 +145,7 @@ timeout --signal=TERM --kill-after=10s 180s qemu-arm -cpu cortex-a7 -L "$sysroot
     --smoke-test --profile "$profile/data" --library /work/tests/fixtures \
     --book /work/tests/fixtures/trevelyans-type-tester.kepub.epub >"$log" 2>&1 || result=$?
 cat "$log"
-[[ "$result" == 0 ]] || fail "ARM userspace smoke exited $result; see build/kindle/arm-smoke.log"
+[[ "$result" == 0 ]] || fail "ARM userspace smoke exited $result; see $log"
 grep -q 'Kindle smoke passed:' "$log" || fail 'ARM app exited without the smoke completion marker'
 [[ -s "$profile/data/config/kobalt.sqlite" ]] || fail 'ARM smoke did not create its SQLite profile'
 echo 'ARM userspace smoke passed. This check does not exercise framebuffer, input, suspend or stock UI.'

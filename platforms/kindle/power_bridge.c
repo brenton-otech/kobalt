@@ -6,7 +6,6 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 #include <sys/prctl.h>
 #include <unistd.h>
 
@@ -18,17 +17,6 @@ typedef int (*PropertyCallback)(Lipc *, const char *, void *, void *);
 static int wake_pipe[2] = {-1, -1};
 static volatile sig_atomic_t stopping;
 static volatile sig_atomic_t overflow;
-static int module_present(const char *modules, const char *name) {
-    const size_t length = strlen(name);
-    const char *at = modules;
-    while ((at = strstr(at, name)) != NULL) {
-        if ((at == modules || at[-1] == ' ' || at[-1] == '\t' || at[-1] == '\n') &&
-            (at[length] == 0 || at[length] == ' ' || at[length] == '\t' || at[length] == '\n'))
-            return 1;
-        at += length;
-    }
-    return 0;
-}
 static void terminate(int sig) {
     (void)sig;
     const int saved = errno;
@@ -89,12 +77,7 @@ int main(void) {
     int (*LipcRegisterIntProperty)(Lipc *, const char *, PropertyCallback, PropertyCallback, void *);
     int (*LipcSubscribeExt)(Lipc *, const char *, const char *, EventCallback, void *);
     int (*LipcSetIntProperty)(Lipc *, const char *, const char *, int);
-    int (*LipcSetStringProperty)(Lipc *, const char *, const char *, const char *);
-    int (*LipcGetStringProperty)(Lipc *, const char *, const char *, char **);
-    void (*LipcFreeString)(char *);
     LOAD(LipcOpenEx); LOAD(LipcClose); LOAD(LipcRegisterIntProperty); LOAD(LipcSubscribeExt); LOAD(LipcSetIntProperty);
-    LOAD(LipcSetStringProperty);
-    LOAD(LipcGetStringProperty); LOAD(LipcFreeString);
     int error = 0;
     Lipc *handle = LipcOpenEx("com.lab126.kaf", &error);
     if (!handle) { fprintf(stderr, "Cannot own framework service: %d\n", error); return 1; }
@@ -115,30 +98,6 @@ int main(void) {
     for (unsigned i = 0; i < sizeof(events) / sizeof(events[0]); ++i) {
         error = LipcSubscribeExt(handle, events[i].source, events[i].name, event_received, NULL);
         if (error != 0) { fprintf(stderr, "Cannot subscribe %s: %d\n", events[i].name, error); goto done; }
-    }
-    if (LipcSetStringProperty(handle, "com.lab126.blanket", "unload", "splash") != 0 ||
-        LipcSetStringProperty(handle, "com.lab126.blanket", "unload", "screensaver") != 0) {
-        fprintf(stderr, "Cannot release stock screen overlays\n");
-        goto done;
-    }
-    struct timespec began, now;
-    clock_gettime(CLOCK_MONOTONIC, &began);
-    for (;;) {
-        char *modules = NULL;
-        error = LipcGetStringProperty(handle, "com.lab126.blanket", "load", &modules);
-        const int present = error == 0 && modules && module_present(modules, "screensaver");
-        if (modules) LipcFreeString(modules);
-        if (error != 0 || stopping) {
-            fprintf(stderr, "Cannot inspect stock screen overlays: %d (stopping=%d)\n", error, stopping);
-            goto done;
-        }
-        if (!present) break;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        if (now.tv_sec - began.tv_sec >= 5) {
-            fprintf(stderr, "Stock screensaver did not unload\n");
-            goto done;
-        }
-        usleep(100000);
     }
     if (write(STDOUT_FILENO, "ready\n", 6) != 6) {
         perror("Power bridge readiness output");
