@@ -54,6 +54,9 @@ int main(int argc, char **argv) {
     check(state.battery.percent == 70 && !state.battery.charging && !state.battery.fullyCharged, "Battery state decode");
     check(state.wifi.enabled && state.wifi.connected && state.wifi.strength == 3, "Wi-Fi level conversion");
     check(state.bluetoothConnected && state.hasLight() && state.hasWarmth(), "Device capabilities decode");
+    values.remove("currentAmberLevel");
+    check(!Device::decode(values).hasWarmth(), "Missing warmth property on device like PW3");
+    values["currentAmberLevel"] = value("0");
     values["BTstate"] = value("1");
     check(!Device::decode(values).bluetoothConnected, "Enabled Bluetooth with a stale name is not connected");
     values["BTstate"] = value("0");
