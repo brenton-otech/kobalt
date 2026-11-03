@@ -103,13 +103,14 @@ bash /work/platforms/kindle/power-bridge-test.sh /work/build/kindle/test-tmp
 # qemu-user executes ARM userspace; it does not emulate a Kindle kernel or EPDC.
 [[ -f /work/build/kindle/sdk-platforms/libqoffscreen.so ]] || fail 'matching SDK offscreen plugin missing; rebuild the application'
 mkdir -p /work/build/kindle/test-tmp
-profile=$(mktemp -d /work/build/kindle/test-tmp/arm-smoke.XXXXXX)
+profile=$(mktemp -d /tmp/arm-smoke.XXXXXX)
 cleanup() { rm -rf "$profile"; }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 mkdir -p "$profile/tmp" "$profile/runtime"
 chmod 700 "$profile/runtime"
+cp -r "$app/assets" "$profile/assets"
 log=/work/build/kindle/arm-smoke.log
 result=0
 ulimit -c 0
@@ -118,10 +119,10 @@ timeout --signal=TERM --kill-after=10s 180s qemu-arm -cpu cortex-a7 -L "$sysroot
     -E QT_QPA_PLATFORM=offscreen \
     -E QT_QPA_PLATFORM_PLUGIN_PATH=/work/build/kindle/sdk-platforms \
     -E "QT_PLUGIN_PATH=$app/plugins" \
-    -E "QT_QPA_FONTDIR=$app/assets/fonts" \
+    -E "QT_QPA_FONTDIR=$profile/assets/fonts" \
     -E "TMPDIR=$profile/tmp" \
     -E "XDG_RUNTIME_DIR=$profile/runtime" \
-    "$app/bin/kobalt" --assets "$app/assets" \
+    "$app/bin/kobalt" --assets "$profile/assets" \
     --smoke-test --profile "$profile/data" --library /work/tests/fixtures \
     --book /work/tests/fixtures/trevelyans-type-tester.kepub.epub >"$log" 2>&1 || result=$?
 cat "$log"
