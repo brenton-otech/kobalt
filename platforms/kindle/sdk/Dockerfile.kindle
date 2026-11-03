@@ -1,0 +1,110 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake ninja-build git curl ca-certificates \
+    python3 pkg-config zstd tar xz-utils libgl1-mesa-dev libx11-dev zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# 1. Install KOReader kindlehf toolchain (arm-kindlehf-linux-gnueabihf with glibc 2.20)
+RUN mkdir -p /sdk && \
+    curl -sL https://github.com/koreader/koxtoolchain/releases/download/2026.08/kindlehf.tar.zst | tar --zstd -xf - -C /sdk/
+
+ENV PATH=/sdk/x-tools/arm-kindlehf-linux-gnueabihf/bin:$PATH
+
+# 2. Cross-compile zlib 1.3.1 for Kindle
+RUN mkdir -p /tmp/zlib && cd /tmp/zlib && \
+    curl -sL https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.xz | tar -xJ --strip-components=1 && \
+    CC=/sdk/x-tools/arm-kindlehf-linux-gnueabihf/bin/arm-kindlehf-linux-gnueabihf-gcc ./configure --prefix=/sdk/runtime && \
+    make -j$(nproc) && make install && \
+    rm -rf /tmp/zlib
+
+# 3. Cross-compile OpenSSL 3.4.1 for Kindle
+RUN mkdir -p /tmp/openssl && cd /tmp/openssl && \
+    curl -sL https://github.com/openssl/openssl/releases/download/openssl-3.4.1/openssl-3.4.1.tar.gz | tar -xz --strip-components=1 && \
+    ./Configure linux-armv4 -march=armv7-a -mfpu=neon -mfloat-abi=hard \
+        --cross-compile-prefix=/sdk/x-tools/arm-kindlehf-linux-gnueabihf/bin/arm-kindlehf-linux-gnueabihf- \
+        --prefix=/sdk/openssl --openssldir=/sdk/openssl/ssl shared no-tests no-docs && \
+    make -j$(nproc) && make install_sw && \
+    rm -rf /tmp/openssl
+
+# 4. Download Qt 6.8.3 source
+RUN mkdir -p /tmp/qt-source && \
+    curl -sL https://download.qt.io/archive/qt/6.8/6.8.3/submodules/qtbase-everywhere-src-6.8.3.tar.xz | tar -xJ -C /tmp/qt-source --strip-components=1
+
+# 5. Build host Qt 6.8.3 tools (moc, rcc, uic, etc.)
+RUN cmake -S /tmp/qt-source -B /tmp/qt-host-build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/sdk/qt-host \
+        -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF \
+        -DFEATURE_gui=OFF -DFEATURE_widgets=OFF -DFEATURE_network=OFF -DFEATURE_sql=OFF \
+        -DFEATURE_testlib=OFF -DFEATURE_xml=OFF -DFEATURE_concurrent=OFF -DFEATURE_printsupport=OFF \
+        -DFEATURE_dbus=OFF -DFEATURE_icu=OFF -DFEATURE_glib=OFF -DINPUT_opengl=no && \
+    cmake --build /tmp/qt-host-build --parallel $(nproc) && \
+    cmake --install /tmp/qt-host-build && \
+    rm -rf /tmp/qt-host-build && \
+    mkdir -p /sdk/qt-host/bin && \
+    for f in /sdk/qt-host/libexec/*; do ln -sf "$f" "/sdk/qt-host/bin/$(basename "$f")"; done
+
+# 6. Create Kindle CMake toolchain file for QtBase cross-compilation
+RUN printf 'set(CMAKE_SYSTEM_NAME Linux)\n\
+set(CMAKE_SYSTEM_PROCESSOR arm)\n\
+set(CMAKE_SYSROOT /sdk/x-tools/arm-kindlehf-linux-gnueabihf/arm-kindlehf-linux-gnueabihf/sysroot)\n\
+set(CMAKE_C_COMPILER /sdk/x-tools/arm-kindlehf-linux-gnueabihf/bin/arm-kindlehf-linux-gnueabihf-gcc)\n\
+set(CMAKE_CXX_COMPILER /sdk/x-tools/arm-kindlehf-linux-gnueabihf/bin/arm-kindlehf-linux-gnueabihf-g++)\n\
+set(CMAKE_AR /sdk/x-tools/arm-kindlehf-linux-gnueabihf/bin/arm-kindlehf-linux-gnueabihf-gcc-ar CACHE FILEPATH "Archiver")\n\
+set(CMAKE_RANLIB /sdk/x-tools/arm-kindlehf-linux-gnueabihf/bin/arm-kindlehf-linux-gnueabihf-gcc-ranlib CACHE FILEPATH "Ranlib")\n\
+set(CMAKE_STRIP /sdk/x-tools/arm-kindlehf-linux-gnueabihf/bin/arm-kindlehf-linux-gnueabihf-strip CACHE FILEPATH "Strip")\n\
+list(APPEND CMAKE_FIND_ROOT_PATH /sdk/qt /sdk/openssl /sdk/runtime ${CMAKE_SYSROOT})\n\
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)\n\
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)\n\
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)\n\
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)\n' > /sdk/kindle-toolchain.cmake
+
+# 7. Cross-compile target QtBase 6.8.3 for Kindle
+RUN cmake -S /tmp/qt-source -B /tmp/qt-target-build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/sdk/qt \
+        -DCMAKE_TOOLCHAIN_FILE=/sdk/kindle-toolchain.cmake \
+        -DQT_HOST_PATH=/sdk/qt-host \
+        -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF \
+        -DFEATURE_gui=ON -DFEATURE_widgets=ON -DFEATURE_network=ON -DFEATURE_sql=ON \
+        -DFEATURE_sql_sqlite=ON -DFEATURE_system_sqlite=OFF \
+        -DINPUT_opengl=no -DFEATURE_vulkan=OFF \
+        -DFEATURE_xcb=OFF -DFEATURE_xlib=OFF -DFEATURE_eglfs=OFF \
+        -DFEATURE_linuxfb=ON -DFEATURE_offscreen=ON \
+        -DFEATURE_dbus=OFF -DFEATURE_icu=OFF -DFEATURE_glib=OFF \
+        -DFEATURE_system_zlib=ON -DZLIB_ROOT=/sdk/runtime \
+        -DOPENSSL_ROOT_DIR=/sdk/openssl -DFEATURE_openssl=ON -DFEATURE_openssl_linked=ON \
+        -DFEATURE_system_freetype=OFF -DFEATURE_system_harfbuzz=OFF \
+        -DFEATURE_system_pcre2=OFF -DFEATURE_system_png=OFF -DFEATURE_system_jpeg=OFF && \
+    cmake --build /tmp/qt-target-build --parallel $(nproc) && \
+    cmake --install /tmp/qt-target-build && \
+    rm -rf /tmp/qt-source /tmp/qt-target-build
+
+# 8. Cross-compile QtSensors 6.8.3 for Kindle
+RUN mkdir -p /tmp/qtsensors && \
+    curl -sL https://download.qt.io/archive/qt/6.8/6.8.3/submodules/qtsensors-everywhere-src-6.8.3.tar.xz | tar -xJ -C /tmp/qtsensors --strip-components=1 && \
+    cmake -S /tmp/qtsensors -B /tmp/qtsensors-build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/sdk/qt \
+        -DCMAKE_TOOLCHAIN_FILE=/sdk/qt/lib/cmake/Qt6/qt.toolchain.cmake \
+        -DQT_HOST_PATH=/sdk/qt-host \
+        -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF && \
+    cmake --build /tmp/qtsensors-build --parallel $(nproc) && \
+    cmake --install /tmp/qtsensors-build && \
+    rm -rf /tmp/qtsensors /tmp/qtsensors-build
+
+# 9. Extract licenses needed by package.cmake & expose runtime libraries to linker search paths
+RUN mkdir -p /sdk/src/openssl-openssl-3.5.9 /sdk/src/qtbase-everywhere-src-6.8.3/LICENSES /sdk/src/qtsensors-everywhere-src-6.8.3/LICENSES && \
+    curl -sL https://raw.githubusercontent.com/openssl/openssl/master/LICENSE.txt -o /sdk/src/openssl-openssl-3.5.9/LICENSE.txt && \
+    curl -sL https://raw.githubusercontent.com/qt/qtbase/6.8.3/LICENSES/LicenseRef-Qt-Commercial.txt -o /sdk/src/qtbase-everywhere-src-6.8.3/LICENSES/LicenseRef-Qt-Commercial.txt && \
+    curl -sL https://raw.githubusercontent.com/qt/qtbase/6.8.3/LICENSES/LGPL-3.0-only.txt -o /sdk/src/qtbase-everywhere-src-6.8.3/LICENSES/LGPL-3.0-only.txt && \
+    curl -sL https://raw.githubusercontent.com/qt/qtbase/6.8.3/LICENSES/GPL-3.0-only.txt -o /sdk/src/qtbase-everywhere-src-6.8.3/LICENSES/GPL-3.0-only.txt && \
+    cp -r /sdk/src/qtbase-everywhere-src-6.8.3/LICENSES/* /sdk/src/qtsensors-everywhere-src-6.8.3/LICENSES/ && \
+    ln -sf /sdk/runtime/lib/libz.so* /sdk/qt/lib/ && \
+    ln -sf /sdk/openssl/lib/libssl.so* /sdk/qt/lib/ && \
+    ln -sf /sdk/openssl/lib/libcrypto.so* /sdk/qt/lib/ && \
+    ln -sf /sdk/runtime/lib/libz.so* /sdk/x-tools/arm-kindlehf-linux-gnueabihf/arm-kindlehf-linux-gnueabihf/sysroot/usr/lib/ && \
+    ln -sf /sdk/openssl/lib/libssl.so* /sdk/x-tools/arm-kindlehf-linux-gnueabihf/arm-kindlehf-linux-gnueabihf/sysroot/usr/lib/ && \
+    ln -sf /sdk/openssl/lib/libcrypto.so* /sdk/x-tools/arm-kindlehf-linux-gnueabihf/arm-kindlehf-linux-gnueabihf/sysroot/usr/lib/
+
+WORKDIR /work
