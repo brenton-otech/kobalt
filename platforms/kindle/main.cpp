@@ -188,17 +188,23 @@ int main(int argc, char **argv) {
         qCritical() << "Cannot install graceful termination handler";
         return 2;
     }
-    window.resize(1236, 1648);
+    const QSize targetSize = app.primaryScreen() && app.primaryScreen()->geometry().isValid() &&
+                             app.primaryScreen()->geometry().width() > 100
+        ? app.primaryScreen()->geometry().size()
+        : QSize(1072, 1448);
+    window.setPreviewResolution(targetSize);
+    window.resize(targetSize);
     if (preview) {
         window.setPreview(true);
         window.setWindowTitle(QStringLiteral("Kobalt Kindle Preview"));
         const auto bounds = app.primaryScreen()->availableGeometry().size() * .85;
-        const auto scale = qMin(1.0, qMin(bounds.width() / 618.0, bounds.height() / 824.0));
-        window.resize(qRound(618 * scale), qRound(824 * scale));
+        const auto scale = qMin(1.0, qMin(bounds.width() / (targetSize.width() / 2.0),
+                                          bounds.height() / (targetSize.height() / 2.0)));
+        window.resize(qRound((targetSize.width() / 2.0) * scale),
+                      qRound((targetSize.height() / 2.0) * scale));
         window.show();
     } else if (smoke || captures) {
-        // The minimal plugin reports a small dummy screen. Keep the PW5
-        // viewport so the smoke check exercises the device's book layout.
+        // Keep the device viewport so the check exercises the device's book layout.
         window.show();
     } else {
         if (app.primaryScreen())
@@ -253,8 +259,8 @@ int main(int argc, char **argv) {
             // and image-resource loading. Do not compare an intermediate frame.
             if (!reader->readyForPresentation())
                 return;
-            if (preview && reader->size() != QSize(1236, 1648)) {
-                fail(QStringLiteral("Scaled preview changed the PW5 reader layout dimensions"));
+            if (preview && reader->size() != window.previewResolution()) {
+                fail(QStringLiteral("Scaled preview changed the Kindle reader layout dimensions"));
                 return;
             }
             auto *page = static_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
