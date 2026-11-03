@@ -25,7 +25,10 @@ struct ContactGate {
 // The prototype exposes one finger as a pointer. Other slots cannot steal a drag.
 struct TouchState {
     static constexpr int maximumSlots = 64;
-    struct Position { int x = 0, y = 0; };
+    struct Position {
+        int x = 0, y = 0;
+        bool knownX = false, knownY = false;
+    };
     std::array<Position, maximumSlots> positions{};
     int slot = 0;
     int primarySlot = -1;
@@ -35,6 +38,7 @@ struct TouchState {
     bool sentDown = false;
     bool dropped = false;
     bool skipPacket = false;
+    bool unknownContact = false;
 
     void tracking(int id)
     {
@@ -68,6 +72,7 @@ struct TouchState {
         if (skipPacket || slot < 0 || slot >= maximumSlots) return;
         auto &position = positions[slot];
         (horizontal ? position.x : position.y) = value;
+        (horizontal ? position.knownX : position.knownY) = true;
         if (primarySlot == slot) {
             x = position.x;
             y = position.y;
@@ -76,10 +81,30 @@ struct TouchState {
 
     bool acceptsPosition() const { return !skipPacket && (primarySlot < 0 || slot == primarySlot); }
 
-    void frameSent()
+    bool hasPosition() const
     {
-        sentDown = down;
-        if (!down) primarySlot = -1;
+        return primarySlot >= 0 && positions[primarySlot].knownX && positions[primarySlot].knownY;
+    }
+
+    void invalidatePositions()
+    {
+        for (auto &position : positions)
+            position.knownX = position.knownY = false;
+    }
+
+    bool frameReady()
+    {
+        if (down && !hasPosition()) unknownContact = true;
+        return !unknownContact;
+    }
+
+    void frameSent(bool delivered = true)
+    {
+        sentDown = delivered && down;
+        if (!down) {
+            primarySlot = -1;
+            unknownContact = false;
+        }
         skipPacket = false;
     }
 };

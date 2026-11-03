@@ -274,19 +274,40 @@ private:
         if (ioctl(fd_, EVIOCGABS(ABS_MT_SLOT), &slotInfo) < 0)
             qFatal("kindle: cannot read current multitouch slot");
         touch_.slot = slotInfo.value;
+#ifdef EVIOCGMTSLOTS
+        if (!slotSnapshots_) {
+            touch_.invalidatePositions();
+            return;
+        }
         int values[kindle::TouchState::maximumSlots + 1]{};
         const size_t length = size_t(slotCount_ + 1) * sizeof(int);
         for (const auto axis : {ABS_MT_POSITION_X, ABS_MT_POSITION_Y}) {
             values[0] = axis;
-            if (ioctl(fd_, EVIOCGMTSLOTS(length), values) < 0)
+            if (ioctl(fd_, EVIOCGMTSLOTS(length), values) < 0) {
+                if (errno == EINVAL || errno == ENOTTY) {
+                    slotSnapshots_ = false;
+                    touch_.invalidatePositions();
+                    qInfo("kindle: slot snapshots unavailable; waiting for known contact coordinates");
+                    return;
+                }
                 qFatal("kindle: cannot read multitouch slot state");
-            for (int slot = 0; slot < slotCount_; ++slot)
-                (axis == ABS_MT_POSITION_X ? touch_.positions[slot].x : touch_.positions[slot].y) = values[slot + 1];
+            }
+            for (int slot = 0; slot < slotCount_; ++slot) {
+                auto &position = touch_.positions[slot];
+                (axis == ABS_MT_POSITION_X ? position.x : position.y) = values[slot + 1];
+                (axis == ABS_MT_POSITION_X ? position.knownX : position.knownY) = true;
+            }
         }
+#else
+        // PW3's stock 3.0 kernel has slots but no EVIOCGMTSLOTS ioctl.
+        // Cached coordinates become usable only after both axes are observed.
+        touch_.invalidatePositions();
+#endif
     }
     void send(ulong timestamp, bool cancelled = false)
     {
         if (!touch_.down && !touch_.sentDown) return;
+        if (!cancelled && !touch_.hasPosition()) return;
         double x = kindle::axisPosition(touch_.x, x_.minimum, x_.maximum);
         double y = kindle::axisPosition(touch_.y, y_.minimum, y_.maximum);
         // The Kindle input driver reports logical panel coordinates. Its
@@ -333,9 +354,13 @@ private:
             touch_.skipPacket = true;
         } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
             lastTimestamp_ = ulong(event.time.tv_sec) * 1000 + ulong(event.time.tv_usec) / 1000;
-            if (gate_.deliver(touch_.down))
+            // The old kernel omits unchanged slot axes. Suppress an entire
+            // contact with unknown coordinates, while learning its deltas for
+            // the next contact. Never synthesize a press at a default (0, 0).
+            const bool knownContact = touch_.frameReady();
+            if (gate_.deliver(touch_.down) && knownContact)
                 send(lastTimestamp_);
-            touch_.frameSent();
+            touch_.frameSent(knownContact);
             if (!slots_) {
                 touch_.slot = 0;
                 // An empty protocol A frame means every contact was lifted.
@@ -347,6 +372,9 @@ private:
     int fd_ = -1;
     input_absinfo x_{}, y_{};
     bool slots_ = false;
+#ifdef EVIOCGMTSLOTS
+    bool slotSnapshots_ = true;
+#endif
     kindle::ContactGate gate_;
     int slotCount_ = 0;
     ulong lastTimestamp_ = 0;

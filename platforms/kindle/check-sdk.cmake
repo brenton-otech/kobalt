@@ -1,0 +1,25 @@
+# Fail configuration before compiling application dependencies with the wrong SDK.
+if(KOBALT_KINDLE_TARGET STREQUAL pw3)
+    set(kindle_abi "soft-float ABI")
+    set(kindle_loader /lib/ld-linux.so.3)
+else()
+    set(kindle_abi "hard-float ABI")
+    set(kindle_loader /lib/ld-linux-armhf.so.3)
+endif()
+file(WRITE "${CMAKE_BINARY_DIR}/kindle-abi.cpp" "int main() { return 0; }\n")
+try_compile(kindle_sdk_links "${CMAKE_BINARY_DIR}/kindle-abi-check"
+    "${CMAKE_BINARY_DIR}/kindle-abi.cpp"
+    COPY_FILE "${CMAKE_BINARY_DIR}/kindle-abi" OUTPUT_VARIABLE kindle_sdk_log)
+if(NOT kindle_sdk_links)
+    message(FATAL_ERROR "Kindle SDK cannot link a target executable: ${kindle_sdk_log}")
+endif()
+if(NOT CMAKE_READELF)
+    message(FATAL_ERROR "The Kindle SDK must supply target readelf")
+endif()
+execute_process(COMMAND "${CMAKE_READELF}" -h -l "${CMAKE_BINARY_DIR}/kindle-abi"
+    OUTPUT_VARIABLE kindle_elf COMMAND_ERROR_IS_FATAL ANY)
+string(FIND "${kindle_elf}" "${kindle_abi}" abi_position)
+string(FIND "${kindle_elf}" "[Requesting program interpreter: ${kindle_loader}]" loader_position)
+if(abi_position EQUAL -1 OR loader_position EQUAL -1)
+    message(FATAL_ERROR "The selected SDK does not match ${KOBALT_KINDLE_TARGET}: expected ${kindle_abi}, ${kindle_loader}")
+endif()

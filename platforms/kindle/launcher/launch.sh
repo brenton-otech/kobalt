@@ -3,10 +3,11 @@
 # KUAL invokes this wrapper. The supervisor survives both its caller and an app crash.
 set -eu
 APP_DIR=$(CDPATH='' cd "$(dirname "$0")/.." && pwd -P)
-if [ "$(uname -s)" != Linux ] || [ ! -e /lib/ld-linux-armhf.so.3 ]; then
-    echo 'Kobalt Kindle requires a hard-float Kindle Linux system.' >&2
+if [ "$(uname -s)" != Linux ]; then
+    echo 'Kobalt Kindle requires Kindle Linux.' >&2
     exit 1
 fi
+sh "$APP_DIR/launcher/check-runtime.sh" "$APP_DIR" || exit 1
 if [ -e /var/local/system/userpasswdenabled ]; then
     echo 'Kobalt prototype cannot run with the Kindle passcode enabled.' >&2
     exit 1

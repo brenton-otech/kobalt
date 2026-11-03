@@ -12,11 +12,30 @@ volume_pid=
 screensaver_loaded=no
 cd / || exit 1
 
-has_screensaver()
+has_module()
 {
+    wanted_module=$1
     modules=$(lipc-get-prop -s -q com.lab126.blanket load) || return 2
-    for module in $modules; do
-        [ "$module" != screensaver ] || return 0
+    for loaded_module in $modules; do
+        [ "$loaded_module" != "$wanted_module" ] || return 0
+    done
+    return 1
+}
+
+wait_for_module()
+{
+    module_name=$1
+    module_expected=$2
+    module_attempts=0
+    while [ "$module_attempts" -lt 50 ]; do
+        if has_module "$module_name"; then module_status=0; else module_status=$?; fi
+        [ "$module_status" != 2 ] || return 1
+        if { [ "$module_expected" = yes ] && [ "$module_status" = 0 ]; } ||
+           { [ "$module_expected" = no ] && [ "$module_status" = 1 ]; }; then
+            return 0
+        fi
+        usleep 100000 || return 1
+        module_attempts=$((module_attempts + 1))
     done
     return 1
 }
@@ -25,17 +44,21 @@ restore_screensaver()
 {
     [ "$screensaver_loaded" = yes ] || return 0
     lipc-set-prop -s -q com.lab126.blanket load screensaver || return 1
-    attempts=0
-    while [ "$attempts" -lt 50 ]; do
-        if has_screensaver; then
-            return 0
+    wait_for_module screensaver yes
+}
+
+release_overlays()
+{
+    # Use short-lived stock clients before starting the app. Polling blanket
+    # through the power helper's live service connection times out on PW3.
+    for release_module in splash screensaver; do
+        if has_module "$release_module"; then
+            lipc-set-prop -s -q com.lab126.blanket unload "$release_module" || return 1
+            wait_for_module "$release_module" no || return 1
         else
-            [ "$?" != 2 ] || return 1
+            [ "$?" = 1 ] || return 1
         fi
-        usleep 100000 || return 1
-        attempts=$((attempts + 1))
     done
-    return 1
 }
 
 stop_bridge()
@@ -131,7 +154,8 @@ cleanup()
 }
 terminate()
 {
-    if [ -n "$child" ]; then kill -TERM "$child" 2>/dev/null || :; fi
+    # cleanup owns the child's single TERM and bounded checkpoint wait.
+    # Sending TERM here as well can interrupt its shutdown handler twice.
     exit 143
 }
 trap cleanup EXIT
@@ -145,7 +169,7 @@ case "$state" in
     *) echo "Refusing to launch: lab126_gui is not running: $state" >&2; exit 1 ;;
 esac
 
-if has_screensaver; then
+if has_module screensaver; then
     screensaver_loaded=yes
 else
     module_status=$?
@@ -189,6 +213,11 @@ else
     exit 1
 fi
 trap terminate INT TERM
+
+if ! release_overlays; then
+    echo 'Could not release stock screen overlays; Kobalt was not started.' >&2
+    exit 1
+fi
 
 # Stock recovery commands must keep their original library environment even
 # when the app cannot execute or its bundled libraries cannot be mapped.
