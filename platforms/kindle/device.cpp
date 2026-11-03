@@ -29,15 +29,15 @@ public:
     bool hasWarmth() const override { return device->state().hasWarmth(); }
     int warmth() const override { return device->state().warmth; }
     int warmthMinimum() const override { return 0; }
-    int warmthMaximum() const override { return 24; }
+    int warmthMaximum() const override { return device->state().hasWarmth() ? 24 : 0; }
     int warmthStep() const override { return 1; }
     // Kindle's existing schedule remains owned by powerd. Manual level
     // changes must not replace that schedule or pretend to configure it.
     bool hasAutomaticWarmth() const override { return false; }
     bool automaticWarmth() const override { return false; }
     bool setAutomaticWarmth(bool) override { return false; }
-    int setWarmth(int value) override { return device->setWarmth(value); }
-    bool saveWarmth() override { return device->warmthVerified(); }
+    int setWarmth(int value) override { return device->state().hasWarmth() ? device->setWarmth(value) : -1; }
+    bool saveWarmth() override { return device->state().hasWarmth() && device->warmthVerified(); }
     bool beginGesture() override {
         if (active)
             return true;
@@ -140,9 +140,16 @@ void Device::refresh() {
                 state_.warmth = previous.warmth;
         }
 #ifndef KOBALT_KINDLE_NATIVE_TESTING
-        QFile status(QStringLiteral("/sys/class/power_supply/bd71827_bat/status"));
-        if (status.open(QIODevice::ReadOnly))
-            state_.battery.fullyCharged = status.read(64).trimmed() == "Full";
+        for (const auto &name : {QStringLiteral("/sys/class/power_supply/bd71827_bat/status"),
+                                 QStringLiteral("/sys/class/power_supply/max77696-battery/status"),
+                                 QStringLiteral("/sys/class/power_supply/max77696_battery/status"),
+                                 QStringLiteral("/sys/class/power_supply/battery/status")}) {
+            QFile status(name);
+            if (status.open(QIODevice::ReadOnly)) {
+                state_.battery.fullyCharged = status.read(64).trimmed() == "Full";
+                break;
+            }
+        }
 #endif
         reading = false;
         QPointer<Device> guard(this);
