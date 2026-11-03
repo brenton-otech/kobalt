@@ -58,13 +58,14 @@ enum class ControllerType {
 struct Layout {
     int width = 0, height = 0;
     size_t stride = 0, bytes = 0;
+    int bytesPerPixel = 1;
     bool inverted = false;
 };
 bool validLayout(const Layout &layout);
-QImage initialFrame(const QSize &size);
+QImage initialFrame(const QSize &size, bool isColor = false);
 bool copyPixels(unsigned char *destination, const Layout &layout, const QImage &pixels, const QRect &area);
 QRect alignEpdcDamage(const QRect &area, int screenWidth);
-Update makeUpdate(const QRect &area, bool full, uint32_t marker, int direction, bool swipeAvailable);
+Update makeUpdate(const QRect &area, bool full, uint32_t marker, int direction, bool swipeAvailable, bool isColor = false);
 EpdcUpdate makeEpdcUpdate(const QRect &area, bool full, uint32_t marker);
 bool supportsSwipe(const QByteArray &header, const QByteArray &loadedName);
 
@@ -80,6 +81,7 @@ public:
     RefreshResult present(const RefreshFrame &frame);
     ControllerType controllerType() const { return controllerType_; }
     const Layout &layout() const { return layout_; }
+    bool isColor() const { return layout_.bytesPerPixel == 4; }
     QString error() const { return error_; }
     unsigned rotation() const { return rotation_; }
     bool swipeAvailable() const { return swipeAvailable_; }

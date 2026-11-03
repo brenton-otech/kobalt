@@ -17,6 +17,12 @@ int main(int argc, char **argv) {
     const auto initial = kindle::mtk::initialFrame(QSize(5, 4));
     check(initial.format() == QImage::Format_Grayscale8 && initial.constScanLine(0)[0] == 255,
           "Framebuffer initialization requires an application or is not white");
+    // Test color initial frame (Kindle Colorsoft)
+    const auto initialColor = kindle::mtk::initialFrame(QSize(5, 4), true);
+    check(initialColor.format() == QImage::Format_RGB32 &&
+          reinterpret_cast<const uint32_t *>(initialColor.constScanLine(0))[0] == 0xffffffff,
+          "Color framebuffer initialization is not RGB32 white");
+
     QCoreApplication app(argc, argv);
     using namespace kindle::mtk;
     QByteArray header(0x51, '\0');
@@ -27,7 +33,7 @@ int main(int argc, char **argv) {
           !supportsSwipe(header, {}), "Unverified waveform capability accepted");
     header[0x50] = 0x58;
     check(!supportsSwipe(header, "TEST"), "Non-TL waveform advertised swipe");
-    Layout layout{5, 4, 8, 32, false};
+    Layout layout{5, 4, 8, 32, 1, false};
     QImage pixels(5, 4, QImage::Format_Grayscale8);
     for (int y = 0; y < 4; ++y)
         for (int x = 0; x < 5; ++x)
@@ -57,8 +63,39 @@ int main(int argc, char **argv) {
                       pixels.convertToFormat(QImage::Format_RGB32), area), "RGB buffer accepted as gray bytes");
     layout.stride = 4;
     check(!validLayout(layout), "Short scanline accepted");
-    layout = {8193, 1, 8193, 8193, false};
+    layout = {8193, 1, 8193, 8193, 1, false};
     check(!validLayout(layout), "Unbounded dimensions accepted");
+
+    // Colorsoft 32-bit ARGB layout and copy tests
+    Layout colorLayout{5, 4, 32, 128, 4, false};
+    check(validLayout(colorLayout), "Valid 32bpp color layout rejected");
+    colorLayout.stride = 16;
+    check(!validLayout(colorLayout), "32bpp short stride accepted");
+    colorLayout.stride = 32;
+
+    QImage colorPixels(5, 4, QImage::Format_RGB32);
+    for (int y = 0; y < 4; ++y) {
+        auto *scan = reinterpret_cast<uint32_t *>(colorPixels.scanLine(y));
+        for (int x = 0; x < 5; ++x)
+            scan[x] = 0xff000000 | (y << 16) | (x << 8) | 0x42;
+    }
+    QByteArray colorMemory(160, char(0x55));
+    check(copyPixels(reinterpret_cast<uchar *>(colorMemory.data()), colorLayout, colorPixels, area),
+          "Valid 32bpp color copy rejected");
+    auto *destWords = reinterpret_cast<const uint32_t *>(colorMemory.constData());
+    for (int y = 0; y < 4; ++y) {
+        for (int x = 0; x < 5; ++x) {
+            const uint32_t expected = area.contains(x, y) ? (0xff000000 | (y << 16) | (x << 8) | 0x42) : 0x55555555;
+            check(destWords[y * 8 + x] == expected, "32bpp color pixel copy mismatch");
+        }
+    }
+    colorLayout.inverted = true;
+    check(copyPixels(reinterpret_cast<uchar *>(colorMemory.data()), colorLayout, colorPixels, area),
+          "Inverted 32bpp color copy rejected");
+    destWords = reinterpret_cast<const uint32_t *>(colorMemory.constData());
+    const uint32_t sample = 0xff000000 | (1 << 16) | (1 << 8) | 0x42;
+    check(destWords[1 * 8 + 1] == (sample ^ 0x00FFFFFF), "32bpp color inversion mismatch");
+
     const auto full = makeUpdate(QRect(0, 0, 1236, 1648), true, 42, 1, true);
     check(full.mode == 1 && full.waveform == 2 && full.marker == 42 && !full.flags &&
           full.temperature == 0x1000, "Full refresh ABI incorrect");
@@ -72,6 +109,14 @@ int main(int argc, char **argv) {
           !makeUpdate(QRect(0, 0, 1200, 1600), false, 44, 1, false).flags &&
           !makeUpdate(QRect(0, 0, 1200, 1600), false, 44, 2, true).flags,
           "Unsafe or unsupported swipe accepted");
+
+    // Colorsoft color refresh waveforms
+    const auto colorFull = makeUpdate(QRect(0, 0, 1264, 1680), true, 50, 0, false, true);
+    check(colorFull.waveform == 14 && colorFull.mode == 1 && colorFull.marker == 50,
+          "Color full refresh GCC16 waveform ABI incorrect");
+    const auto colorPartial = makeUpdate(QRect(10, 20, 100, 200), false, 51, 0, false, true);
+    check(colorPartial.waveform == 257 && colorPartial.mode == 0 && colorPartial.marker == 51,
+          "Color partial refresh waveform ABI incorrect");
 
     // EPDC (Kindle PW3) alignment and ABI tests
     const auto emptyDamage = alignEpdcDamage({}, 1072);
