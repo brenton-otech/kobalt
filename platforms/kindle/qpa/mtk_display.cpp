@@ -113,6 +113,25 @@ Update makeUpdate(const QRect &area, bool full, uint32_t marker, int direction, 
     }
     return update;
 }
+QRect alignEpdcDamage(const QRect &area, int screenWidth) {
+    if (area.isEmpty())
+        return {};
+    const int left = area.left() & ~7;
+    const int right = qMin(screenWidth, (area.right() + 8) & ~7);
+    return QRect(left, area.top(), right - left, area.height());
+}
+EpdcUpdate makeEpdcUpdate(const QRect &area, bool full, uint32_t marker) {
+    EpdcUpdate update{};
+    update.region = {uint32_t(area.top()), uint32_t(area.left()), uint32_t(area.width()), uint32_t(area.height())};
+    update.waveform_mode = full ? 2 : 0x101; // GC16 or AUTO
+    update.update_mode = full ? 1 : 0;
+    update.update_marker = marker;
+    update.temp = 0x1000; // TEMP_USE_AMBIENT
+    update.flags = 0;
+    update.dither_mode = 0;
+    update.quant_bit = 0;
+    return update;
+}
 Display::Display() = default;
 Display::~Display() {
 #ifdef __linux__
@@ -136,10 +155,18 @@ bool Display::open() {
     }
     layout_ = {int(variable.xres), int(variable.yres), fixed.line_length, fixed.smem_len, variable.grayscale == 2};
     rotation_ = variable.rotate;
-    if (std::strncmp(fixed.id, "hwtcon_v2", sizeof(fixed.id)) != 0 || variable.bits_per_pixel != 8 ||
-        (variable.grayscale != 1 && variable.grayscale != 2) || variable.xoffset || variable.yoffset ||
-        fixed.type != FB_TYPE_PACKED_PIXELS || rotation_ > 3 || !validLayout(layout_)) {
-        error_ = QStringLiteral("Unsupported framebuffer layout; expected hwtcon_v2, 8-bit grayscale, first plane");
+    if (std::strncmp(fixed.id, "hwtcon_v2", sizeof(fixed.id)) == 0) {
+        controllerType_ = ControllerType::Mtk;
+    } else if (std::strncmp(fixed.id, "mxc_epdc_fb", sizeof(fixed.id)) == 0) {
+        controllerType_ = ControllerType::Epdc;
+    } else {
+        error_ = QStringLiteral("Unsupported framebuffer layout; expected hwtcon_v2 or mxc_epdc_fb");
+        return false;
+    }
+    if (variable.bits_per_pixel != 8 || (variable.grayscale != 1 && variable.grayscale != 2) ||
+        variable.xoffset || variable.yoffset || fixed.type != FB_TYPE_PACKED_PIXELS ||
+        rotation_ > 3 || !validLayout(layout_)) {
+        error_ = QStringLiteral("Unsupported framebuffer layout; expected 8-bit grayscale, first plane");
         return false;
     }
     void *memory = ::mmap(nullptr, layout_.bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -148,18 +175,23 @@ bool Display::open() {
         return false;
     }
     mapping = static_cast<unsigned char *>(memory);
-    // Match the file header to the waveform the kernel actually loaded. A
-    // controller name alone does not prove that swipe waveforms are available.
-    QFile pathFile(QStringLiteral("/sys/module/hwtcon_v2/parameters/waveform_path"));
-    QFile nameFile(QStringLiteral("/proc/eink/waveform/human_version"));
-    if (pathFile.open(QIODevice::ReadOnly) && nameFile.open(QIODevice::ReadOnly)) {
-        const auto path = pathFile.read(4096).trimmed();
-        const auto loadedName = nameFile.read(256).trimmed();
-        if (path.startsWith('/') && !path.contains('\0')) {
-            swipeAvailable_ = supportsSwipe(readWaveformHeader(path), loadedName);
+    if (controllerType_ == ControllerType::Mtk) {
+        // Match the file header to the waveform the kernel actually loaded. A
+        // controller name alone does not prove that swipe waveforms are available.
+        QFile pathFile(QStringLiteral("/sys/module/hwtcon_v2/parameters/waveform_path"));
+        QFile nameFile(QStringLiteral("/proc/eink/waveform/human_version"));
+        if (pathFile.open(QIODevice::ReadOnly) && nameFile.open(QIODevice::ReadOnly)) {
+            const auto path = pathFile.read(4096).trimmed();
+            const auto loadedName = nameFile.read(256).trimmed();
+            if (path.startsWith('/') && !path.contains('\0')) {
+                swipeAvailable_ = supportsSwipe(readWaveformHeader(path), loadedName);
+            }
         }
+    } else {
+        swipeAvailable_ = false;
     }
-    qInfo("kindle: native hwtcon_v2 %dx%d stride=%zu rotation=%u inverted=%d swipe=%d",
+    qInfo("kindle: native %s %dx%d stride=%zu rotation=%u inverted=%d swipe=%d",
+          controllerType_ == ControllerType::Mtk ? "hwtcon_v2" : "mxc_epdc_fb",
           layout_.width, layout_.height, layout_.stride, rotation_, layout_.inverted, swipeAvailable_);
     return true;
 #else
@@ -169,25 +201,43 @@ bool Display::open() {
 }
 RefreshResult Display::present(const RefreshFrame &frame) {
 #ifdef __linux__
-    const auto area = frame.full ? frame.pixels.rect() : frame.damage.boundingRect().intersected(frame.pixels.rect());
+    QRect area;
+    if (controllerType_ == ControllerType::Epdc) {
+        const auto unaligned = frame.full ? frame.pixels.rect() : frame.damage.boundingRect().intersected(frame.pixels.rect());
+        area = frame.full ? unaligned : alignEpdcDamage(unaligned, layout_.width);
+    } else {
+        area = frame.full ? frame.pixels.rect() : frame.damage.boundingRect().intersected(frame.pixels.rect());
+    }
     if (!copyPixels(mapping, layout_, frame.pixels, area))
         return {false, true, QStringLiteral("Invalid framebuffer snapshot or damage")};
     if (!++marker)
         ++marker;
-    auto update = makeUpdate(area, frame.full, marker, frame.animationDirection, swipeAvailable_);
     QElapsedTimer elapsed;
     elapsed.start();
-    if (::ioctl(fd, sendUpdate, &update) < 0)
-        return {false, errno != EBUSY && errno != EAGAIN, QStringLiteral("Kindle refresh submission failed: %1")
-            .arg(QString::fromLocal8Bit(std::strerror(errno)))};
+    int submitResult = -1;
+    int submitErrno = 0;
+    if (controllerType_ == ControllerType::Epdc) {
+        auto update = makeEpdcUpdate(area, frame.full, marker);
+        submitResult = ::ioctl(fd, epdcSendUpdate, &update);
+        submitErrno = errno;
+    } else {
+        auto update = makeUpdate(area, frame.full, marker, frame.animationDirection, swipeAvailable_);
+        submitResult = ::ioctl(fd, sendUpdate, &update);
+        submitErrno = errno;
+    }
+    if (submitResult < 0)
+        return {false, submitErrno != EBUSY && submitErrno != EAGAIN,
+                QStringLiteral("Kindle refresh submission failed: %1")
+                    .arg(QString::fromLocal8Bit(std::strerror(submitErrno)))};
     const auto submitted = elapsed.elapsed();
     Completion completion{marker, 0};
     const int result = ::ioctl(fd, waitComplete, &completion);
     const auto finished = elapsed.elapsed();
     if (qEnvironmentVariableIsSet("KOBALT_KINDLE_DISPLAY_TRACE"))
-        qInfo("kindle: refresh marker=%u full=%d area=%dx%d swipe=%u direction=%u submit=%lldms wait=%lldms",
-              marker, frame.full, area.width(), area.height(), update.swipeSteps, update.swipeDirection, static_cast<long long>(submitted),
-              static_cast<long long>(finished - submitted));
+        qInfo("kindle: refresh marker=%u full=%d area=%dx%d controller=%s submit=%lldms wait=%lldms",
+              marker, frame.full, area.width(), area.height(),
+              controllerType_ == ControllerType::Mtk ? "hwtcon_v2" : "mxc_epdc_fb",
+              static_cast<long long>(submitted), static_cast<long long>(finished - submitted));
     // This firmware returns zero even when its five-second wait expires.
     // Never overwrite the buffer after an uncertain completion.
     if (result < 0 || finished - submitted >= 4900)
