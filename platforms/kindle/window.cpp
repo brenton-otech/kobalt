@@ -272,7 +272,7 @@ bool Window::libraryContains(const QString &path) const {
 }
 void Window::sizeCanvas() {
     if (preview) {
-        const QSize pixels(1236, 1648);
+        const QSize pixels = previewDimensions;
         const qreal scale = qMin(qreal(width()) / pixels.width(), qreal(height()) / pixels.height());
         if (auto *reader = controller.window())
             reader->resize(pixels);
@@ -289,9 +289,15 @@ void Window::setPreview(bool enabled) {
     preview = enabled;
     sizeCanvas();
 }
+void Window::setPreviewResolution(const QSize &size) {
+    if (size.isValid()) {
+        previewDimensions = size;
+        sizeCanvas();
+    }
+}
 QSize Window::readerPixels() const {
     if (preview)
-        return {1236, 1648};
+        return previewDimensions;
     // The hidden canvas has not received its first resize yet. Open at the
     // space allocated to it, rather than paginating at its default size.
     const auto size = stack->contentsRect().size();

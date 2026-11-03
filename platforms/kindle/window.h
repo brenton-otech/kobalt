@@ -26,6 +26,8 @@ public:
     bool deviceFailed() const { return deviceFailure; }
     bool libraryContains(const QString &path) const;
     void setPreview(bool enabled);
+    void setPreviewResolution(const QSize &size);
+    QSize previewResolution() const { return previewDimensions; }
     void startDeviceLifecycle();
 #ifdef KOBALT_KINDLE_NATIVE_TESTING
     void simulatePowerEvent(const QByteArray &event);
@@ -55,6 +57,7 @@ private:
     bool deviceFailure = false;
     bool exitFramePending = false, exitFrameReady = false;
     bool preview = false;
+    QSize previewDimensions{1072, 1448};
     QSize readerPixels() const;
     void sizeCanvas();
     void recordProgress();
