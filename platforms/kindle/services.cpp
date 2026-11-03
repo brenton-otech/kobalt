@@ -57,7 +57,7 @@ ReaderHostServices readerServices(std::shared_ptr<Device> device) {
     ReaderHostServices result;
     result.deviceName = QStringLiteral("Kindle");
     result.colorDisplay = [] {
-        return false;
+        return qApp && qApp->property("kobalt.colorDisplay").toBool();
     };
     result.browserAvailable = [] {
         return false;

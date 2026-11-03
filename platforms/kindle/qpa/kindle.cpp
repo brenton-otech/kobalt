@@ -41,8 +41,9 @@ public:
         if (!display.open())
             qFatal("kindle: %s", qPrintable(display.error()));
         qApp->setProperty("kobalt.swipeAvailable", display.swipeAvailable());
+        qApp->setProperty("kobalt.colorDisplay", display.isColor());
         const auto &layout = display.layout();
-        frame = kindle::mtk::initialFrame(QSize(layout.width, layout.height));
+        frame = kindle::mtk::initialFrame(QSize(layout.width, layout.height), display.isColor());
         queue = std::make_unique<kindle::RefreshQueue>([this](const kindle::RefreshFrame &value) {
             return display.present(value);
         });

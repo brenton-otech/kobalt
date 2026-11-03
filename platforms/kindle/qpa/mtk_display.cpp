@@ -61,7 +61,12 @@ QByteArray readWaveformHeader(const QByteArray &path) {
 }
 }
 #endif
-QImage initialFrame(const QSize &size) {
+QImage initialFrame(const QSize &size, bool isColor) {
+    if (isColor) {
+        QImage image(size, QImage::Format_RGB32);
+        image.fill(0xffffffff);
+        return image;
+    }
     QImage image(size, QImage::Format_Grayscale8);
     // QPA construction precedes font initialization. The QColor overload uses
     // a painter for grayscale images and cannot run at this point.
@@ -75,14 +80,33 @@ bool supportsSwipe(const QByteArray &header, const QByteArray &loadedName) {
     return end == loadedName.size() && header.left(end) == loadedName && uchar(header[0x50]) == 0x59;
 }
 bool validLayout(const Layout &layout) {
+    const int bpp = layout.bytesPerPixel > 0 ? layout.bytesPerPixel : 1;
     return layout.width > 0 && layout.height > 0 && layout.width <= 8192 && layout.height <= 8192 &&
-        layout.stride >= size_t(layout.width) && layout.stride <= 65536 &&
+        (bpp == 1 || bpp == 4) &&
+        layout.stride >= size_t(layout.width) * size_t(bpp) && layout.stride <= 65536 &&
         layout.bytes >= layout.stride * size_t(layout.height);
 }
 bool copyPixels(unsigned char *destination, const Layout &layout, const QImage &pixels, const QRect &area) {
-    if (!destination || !validLayout(layout) || pixels.format() != QImage::Format_Grayscale8 ||
-        pixels.size() != QSize(layout.width, layout.height) || area.isEmpty() ||
-        !pixels.rect().contains(area))
+    if (!destination || !validLayout(layout) || area.isEmpty() ||
+        pixels.size() != QSize(layout.width, layout.height) || !pixels.rect().contains(area))
+        return false;
+    const int bpp = layout.bytesPerPixel > 0 ? layout.bytesPerPixel : 1;
+    if (bpp == 4) {
+        if (pixels.format() != QImage::Format_RGB32 && pixels.format() != QImage::Format_ARGB32_Premultiplied)
+            return false;
+        for (int y = area.top(); y <= area.bottom(); ++y) {
+            auto *out = reinterpret_cast<uint32_t *>(destination + size_t(y) * layout.stride) + area.left();
+            const auto *in = reinterpret_cast<const uint32_t *>(pixels.constScanLine(y)) + area.left();
+            if (layout.inverted) {
+                for (int x = 0; x < area.width(); ++x)
+                    out[x] = in[x] ^ 0x00FFFFFF;
+            } else {
+                std::memcpy(out, in, size_t(area.width()) * 4);
+            }
+        }
+        return true;
+    }
+    if (pixels.format() != QImage::Format_Grayscale8)
         return false;
     for (int y = area.top(); y <= area.bottom(); ++y) {
         auto *out = destination + size_t(y) * layout.stride + size_t(area.left());
@@ -98,10 +122,14 @@ bool copyPixels(unsigned char *destination, const Layout &layout, const QImage &
     }
     return true;
 }
-Update makeUpdate(const QRect &area, bool full, uint32_t marker, int direction, bool swipeAvailable) {
+Update makeUpdate(const QRect &area, bool full, uint32_t marker, int direction, bool swipeAvailable, bool isColor) {
     Update update{};
     update.region = {uint32_t(area.y()), uint32_t(area.x()), uint32_t(area.width()), uint32_t(area.height())};
-    update.waveform = full ? 2 : 257; // GC16 or firmware AUTO.
+    if (isColor) {
+        update.waveform = full ? 14 : 257; // 14 = MTK_WAVEFORM_MODE_GCC16 for full color; 257 = AUTO
+    } else {
+        update.waveform = full ? 2 : 257; // 2 = GC16; 257 = AUTO
+    }
     update.mode = full ? 1 : 0;
     update.marker = marker;
     update.temperature = 0x1000; // Ambient sensor.
@@ -153,7 +181,8 @@ bool Display::open() {
         error_ = QStringLiteral("Cannot inspect Kindle framebuffer: %1").arg(QString::fromLocal8Bit(std::strerror(errno)));
         return false;
     }
-    layout_ = {int(variable.xres), int(variable.yres), fixed.line_length, fixed.smem_len, variable.grayscale == 2};
+    layout_ = {int(variable.xres), int(variable.yres), fixed.line_length, fixed.smem_len,
+               variable.bits_per_pixel == 32 ? 4 : 1, variable.grayscale == 2};
     rotation_ = variable.rotate;
     if (std::strncmp(fixed.id, "hwtcon_v2", sizeof(fixed.id)) == 0) {
         controllerType_ = ControllerType::Mtk;
@@ -163,10 +192,12 @@ bool Display::open() {
         error_ = QStringLiteral("Unsupported framebuffer layout; expected hwtcon_v2 or mxc_epdc_fb");
         return false;
     }
-    if (variable.bits_per_pixel != 8 || (variable.grayscale != 1 && variable.grayscale != 2) ||
-        variable.xoffset || variable.yoffset || fixed.type != FB_TYPE_PACKED_PIXELS ||
+    const bool validColor = (variable.bits_per_pixel == 32 && fixed.type == FB_TYPE_PACKED_PIXELS);
+    const bool validGray = (variable.bits_per_pixel == 8 && (variable.grayscale == 1 || variable.grayscale == 2) &&
+                            fixed.type == FB_TYPE_PACKED_PIXELS);
+    if ((!validColor && !validGray) || variable.xoffset || variable.yoffset ||
         rotation_ > 3 || !validLayout(layout_)) {
-        error_ = QStringLiteral("Unsupported framebuffer layout; expected 8-bit grayscale, first plane");
+        error_ = QStringLiteral("Unsupported framebuffer layout; expected 8-bit grayscale or 32-bit color, first plane");
         return false;
     }
     void *memory = ::mmap(nullptr, layout_.bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -190,9 +221,10 @@ bool Display::open() {
     } else {
         swipeAvailable_ = false;
     }
-    qInfo("kindle: native %s %dx%d stride=%zu rotation=%u inverted=%d swipe=%d",
+    qInfo("kindle: native %s %dx%d (%s) stride=%zu rotation=%u inverted=%d swipe=%d",
           controllerType_ == ControllerType::Mtk ? "hwtcon_v2" : "mxc_epdc_fb",
-          layout_.width, layout_.height, layout_.stride, rotation_, layout_.inverted, swipeAvailable_);
+          layout_.width, layout_.height, layout_.bytesPerPixel == 4 ? "32-bit color" : "8-bit gray",
+          layout_.stride, rotation_, layout_.inverted, swipeAvailable_);
     return true;
 #else
     error_ = QStringLiteral("Kindle framebuffer requires Linux");
@@ -221,7 +253,7 @@ RefreshResult Display::present(const RefreshFrame &frame) {
         submitResult = ::ioctl(fd, epdcSendUpdate, &update);
         submitErrno = errno;
     } else {
-        auto update = makeUpdate(area, frame.full, marker, frame.animationDirection, swipeAvailable_);
+        auto update = makeUpdate(area, frame.full, marker, frame.animationDirection, swipeAvailable_, isColor());
         submitResult = ::ioctl(fd, sendUpdate, &update);
         submitErrno = errno;
     }
