@@ -72,5 +72,32 @@ int main(int argc, char **argv) {
           !makeUpdate(QRect(0, 0, 1200, 1600), false, 44, 1, false).flags &&
           !makeUpdate(QRect(0, 0, 1200, 1600), false, 44, 2, true).flags,
           "Unsafe or unsupported swipe accepted");
-    std::puts("Kindle MTK ABI, damage bounds, stride, inversion and swipe guards passed.");
+
+    // EPDC (Kindle PW3) alignment and ABI tests
+    const auto emptyDamage = alignEpdcDamage({}, 1072);
+    check(emptyDamage.isEmpty(), "Empty EPDC damage not empty");
+
+    const auto aligned = alignEpdcDamage(QRect(3, 10, 15, 20), 1072);
+    check(aligned.left() == 0 && aligned.top() == 10 && aligned.width() == 24 && aligned.height() == 20,
+          "EPDC damage 8-pixel alignment incorrect");
+    check((aligned.left() % 8 == 0) && (aligned.width() % 8 == 0),
+          "EPDC left or width not multiple of 8");
+
+    const auto clamped = alignEpdcDamage(QRect(1060, 50, 12, 100), 1072);
+    check(clamped.left() == 1056 && clamped.right() == 1071 && clamped.width() == 16,
+          "EPDC damage screen width boundary clamp incorrect");
+
+    const auto epdcFull = makeEpdcUpdate(QRect(0, 0, 1072, 1448), true, 101);
+    check(epdcFull.region.top == 0 && epdcFull.region.left == 0 &&
+          epdcFull.region.width == 1072 && epdcFull.region.height == 1448 &&
+          epdcFull.waveform_mode == 2 && epdcFull.update_mode == 1 &&
+          epdcFull.update_marker == 101 && epdcFull.temp == 0x1000 &&
+          epdcFull.flags == 0, "EPDC full update ABI incorrect");
+
+    const auto epdcPartial = makeEpdcUpdate(QRect(8, 16, 64, 32), false, 102);
+    check(epdcPartial.waveform_mode == 0x101 && epdcPartial.update_mode == 0 &&
+          epdcPartial.update_marker == 102 && epdcPartial.temp == 0x1000,
+          "EPDC partial update ABI incorrect");
+
+    std::puts("Kindle MTK and EPDC ABI, damage bounds, stride, inversion and swipe guards passed.");
 }

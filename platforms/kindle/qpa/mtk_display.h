@@ -26,6 +26,35 @@ static_assert(sizeof(Completion) == 8);
 constexpr unsigned long sendUpdate = 0x4060462e;
 constexpr unsigned long waitComplete = 0xc008462f;
 
+// Freescale / NXP i.MX6 EPDC ABI for Kindle PW1/PW2/PW3 (mxc_epdc_fb).
+// All fields are 32 bits on ARM.
+struct EpdcRect { uint32_t top, left, width, height; };
+struct EpdcAltBufferData {
+    uint32_t phys_addr;
+    uint32_t width;
+    uint32_t height;
+    EpdcRect alt_update_region;
+};
+struct EpdcUpdate {
+    EpdcRect region;
+    uint32_t waveform_mode;
+    uint32_t update_mode;
+    uint32_t update_marker;
+    int32_t temp;
+    uint32_t flags;
+    int32_t dither_mode;
+    int32_t quant_bit;
+    EpdcAltBufferData alt;
+};
+static_assert(sizeof(EpdcUpdate) == 72);
+constexpr unsigned long epdcSendUpdate = 0x4048462e;
+
+enum class ControllerType {
+    Unknown,
+    Mtk,  // hwtcon_v2 (Paperwhite 5 / MediaTek)
+    Epdc  // mxc_epdc_fb (Paperwhite 3 / NXP i.MX6)
+};
+
 struct Layout {
     int width = 0, height = 0;
     size_t stride = 0, bytes = 0;
@@ -34,7 +63,9 @@ struct Layout {
 bool validLayout(const Layout &layout);
 QImage initialFrame(const QSize &size);
 bool copyPixels(unsigned char *destination, const Layout &layout, const QImage &pixels, const QRect &area);
+QRect alignEpdcDamage(const QRect &area, int screenWidth);
 Update makeUpdate(const QRect &area, bool full, uint32_t marker, int direction, bool swipeAvailable);
+EpdcUpdate makeEpdcUpdate(const QRect &area, bool full, uint32_t marker);
 bool supportsSwipe(const QByteArray &header, const QByteArray &loadedName);
 
 // One worker owns present(). Destruction follows RefreshQueue::stop(), so the
@@ -47,6 +78,7 @@ public:
     Display &operator=(const Display &) = delete;
     bool open();
     RefreshResult present(const RefreshFrame &frame);
+    ControllerType controllerType() const { return controllerType_; }
     const Layout &layout() const { return layout_; }
     QString error() const { return error_; }
     unsigned rotation() const { return rotation_; }
@@ -57,6 +89,7 @@ private:
     unsigned char *mapping = nullptr;
     uint32_t marker = 0;
 #endif
+    ControllerType controllerType_ = ControllerType::Unknown;
     Layout layout_;
     unsigned rotation_ = 0;
     bool swipeAvailable_ = false;
