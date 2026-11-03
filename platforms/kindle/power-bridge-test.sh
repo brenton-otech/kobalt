@@ -15,7 +15,19 @@ export LD_LIBRARY_PATH="$scratch"
 [[ $(grep -c '^readyToSuspend$' "$scratch/output") == 3 ]]
 grep -q '^ready$' "$scratch/output"
 grep -q '^closed$' "$scratch/errors"
-for failure in FAKE_DUPLICATE FAKE_SUBSCRIBE_FAIL FAKE_UNLOAD_FAIL; do
+# Firmware 5.13.5 times out when this live service connection polls blanket.
+# Overlay ownership belongs to the supervisor; helper readiness must not wait
+# for that query or depend on the screen-overlay service.
+if ! { sleep 0.2; } | timeout --kill-after=1s 3s env FAKE_OVERLAY_TIMEOUT=1 "$scratch/bridge" >"$scratch/output" 2>"$scratch/errors"; then
+    cat "$scratch/errors" >&2
+    echo 'Screen-overlay query failure prevented power bridge readiness.' >&2
+    exit 1
+fi
+grep -q '^ready$' "$scratch/output"
+if grep -q 'overlay-query-timed-out' "$scratch/errors"; then
+    echo 'Power bridge still polls the stock screen-overlay service.' >&2; exit 1
+fi
+for failure in FAKE_DUPLICATE FAKE_SUBSCRIBE_FAIL FAKE_REGISTER_FAIL; do
     result=0
     timeout --kill-after=1s 3s env "$failure=1" "$scratch/bridge" </dev/null >"$scratch/output" 2>"$scratch/errors" || result=$?
     [[ $result == 1 ]] && ! grep -q '^ready$' "$scratch/output" || { cat "$scratch/errors" >&2; exit 1; }

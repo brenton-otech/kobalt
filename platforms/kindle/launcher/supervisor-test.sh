@@ -60,14 +60,55 @@ cat >"$TEST_DIR/app/bin/kobalt" <<'EOF'
 case "$(ps -o stat= -p "$KINDLE_TEST_VOLUME_PID")" in *T*) ;; *) exit 99 ;; esac
 [ "$(pwd)" = / ] || exit 98
 case "${LD_LIBRARY_PATH:-}" in "$KINDLE_TEST_ROOT/app/lib"*) ;; *) exit 96 ;; esac
+if grep -Eq '(^| )(splash|screensaver)( |$)' "$KINDLE_TEST_ROOT/modules"; then
+    echo 'Reader started before stock overlays were released.' >&2
+    exit 95
+fi
 echo app >>"$KINDLE_TEST_ROOT/actions"
 mkdir "$KOBALT_KINDLE_RUN_DIR/waveform-abandoned"
 exit "${KINDLE_TEST_APP_EXIT:-0}"
 EOF
 chmod +x "$TEST_DIR/tools/status" "$TEST_DIR/tools/start" "$TEST_DIR/tools/stop" "$TEST_DIR/tools/usleep" "$TEST_DIR/app/bin/kobalt"
-printf '#!/bin/sh\ncase "$4" in load) echo "${KINDLE_TEST_MODULES-screensaver langpicker blankwindow}" ;; *) echo 1 ;; esac\n' >"$TEST_DIR/tools/lipc-get-prop"
+cat >"$TEST_DIR/tools/lipc-get-prop" <<'EOF'
+#!/bin/sh
+set -eu
+[ "$4" = load ] || { echo 1; exit 0; }
+if [ -f "$KINDLE_TEST_ROOT/pending-module" ]; then
+    [ "${KINDLE_TEST_SCREEN_QUERY_FAIL:-0}" = 0 ] || exit 1
+    read -r module remaining <"$KINDLE_TEST_ROOT/pending-module"
+    if [ "$remaining" = 0 ]; then
+        updated=
+        for current in $(cat "$KINDLE_TEST_ROOT/modules"); do
+            [ "$current" = "$module" ] || updated="$updated $current"
+        done
+        printf '%s\n' "$updated" >"$KINDLE_TEST_ROOT/modules"
+        rm "$KINDLE_TEST_ROOT/pending-module"
+    elif [ "$remaining" -gt 0 ]; then
+        printf '%s %s\n' "$module" "$((remaining - 1))" >"$KINDLE_TEST_ROOT/pending-module"
+    fi
+fi
+cat "$KINDLE_TEST_ROOT/modules"
+EOF
 chmod +x "$TEST_DIR/tools/lipc-get-prop"
-printf '#!/bin/sh\nexit "${KINDLE_TEST_SCREEN_RESTORE_FAIL:-0}"\n' >"$TEST_DIR/tools/lipc-set-prop"
+cat >"$TEST_DIR/tools/lipc-set-prop" <<'EOF'
+#!/bin/sh
+set -eu
+printf '%s %s\n' "$4" "$5" >>"$KINDLE_TEST_ROOT/overlay-actions"
+case "$4" in
+    unload)
+        [ "${KINDLE_TEST_SCREEN_UNLOAD_FAIL:-0}" = 0 ] || exit 1
+        delay=${KINDLE_TEST_SCREEN_UNLOAD_DELAY:-0}
+        [ "${KINDLE_TEST_SCREEN_STICKY:-0}" = 0 ] || delay=-1
+        printf '%s %s\n' "$5" "$delay" >"$KINDLE_TEST_ROOT/pending-module"
+        ;;
+    load)
+        [ "${KINDLE_TEST_SCREEN_RESTORE_FAIL:-0}" = 0 ] || exit 1
+        rm -f "$KINDLE_TEST_ROOT/pending-module"
+        printf '%s\n' "$5" >>"$KINDLE_TEST_ROOT/modules"
+        ;;
+    *) exit 1 ;;
+esac
+EOF
 chmod +x "$TEST_DIR/tools/lipc-set-prop"
 export PATH="$TEST_DIR/tools:$PATH"
 
@@ -77,6 +118,9 @@ run_case()
     cp "$SUPERVISOR" "$TEST_DIR/run/supervisor.sh"
     : >"$TEST_DIR/actions"
     : >"$TEST_DIR/delays"
+    : >"$TEST_DIR/overlay-actions"
+    rm -f "$TEST_DIR/pending-module"
+    printf '%s\n' "${KINDLE_TEST_MODULES-screensaver langpicker blankwindow}" >"$TEST_DIR/modules"
     result=0
     sh "$TEST_DIR/run/supervisor.sh" "$TEST_DIR/app" "$TEST_DIR/run" || result=$?
     kill -0 "$KINDLE_TEST_VOLUME_PID"
@@ -84,6 +128,7 @@ run_case()
 }
 
 # A volume daemon already paused by another reader is not ours to resume.
+printf '%s\n' 'screensaver langpicker blankwindow' >"$TEST_DIR/modules"
 kill -STOP "$KINDLE_TEST_VOLUME_PID"
 mkdir "$TEST_DIR/run"
 cp "$SUPERVISOR" "$TEST_DIR/run/supervisor.sh"
@@ -98,6 +143,19 @@ run_case
 [ "$result" = 0 ] && [ ! -e "$TEST_DIR/run" ]
 [ "$(cat "$TEST_DIR/delays")" = delay ]
 [ "$(cat "$TEST_DIR/actions")" = "$(printf 'stop\napp\nstart')" ]
+# Both overlays must finish their asynchronous unload before app startup.
+export KINDLE_TEST_MODULES='splash screensaver langpicker blankwindow' KINDLE_TEST_SCREEN_UNLOAD_DELAY=2
+run_case
+[ "$result" = 0 ] && [ ! -e "$TEST_DIR/run" ]
+[ "$(cat "$TEST_DIR/overlay-actions")" = "$(printf 'unload splash\nunload screensaver\nload screensaver')" ]
+unset KINDLE_TEST_MODULES KINDLE_TEST_SCREEN_UNLOAD_DELAY
+for failure in KINDLE_TEST_SCREEN_UNLOAD_FAIL KINDLE_TEST_SCREEN_QUERY_FAIL KINDLE_TEST_SCREEN_STICKY; do
+    export "$failure=1"
+    run_case
+    [ "$result" = 1 ] && [ ! -e "$TEST_DIR/run" ]
+    [ "$(cat "$TEST_DIR/actions")" = "$(printf 'stop\nstart')" ]
+    unset "$failure"
+done
 # Execution can still fail after preflight, for example after a mount change.
 chmod -x "$TEST_DIR/app/bin/kobalt"
 run_case

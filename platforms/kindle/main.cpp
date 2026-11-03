@@ -368,12 +368,5 @@ int main(int argc, char **argv) {
         QTimer::singleShot(0, &window, [&window, book] { window.openBook(book); });
     const int result = app.exec();
     const int exitCode = result != 0 ? result : (window.deviceFailed() ? 1 : 0);
-#if defined(__linux__)
-    // glibc <= 2.20 has a known bug (glibc bug 11941) where dynamic plugin
-    // teardown during exit() / _dl_fini triggers `_dl_close: Assertion map->l_init_called failed!`.
-    // kobalt's state and SQLite database are already cleanly synced before app.exec() returns.
-    // Use _exit() to cleanly terminate without invoking the buggy linker teardown.
-    _exit(exitCode);
-#endif
     return exitCode;
 }

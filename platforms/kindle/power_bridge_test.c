@@ -38,6 +38,7 @@ void LipcClose(void *handle) {
 }
 int LipcRegisterIntProperty(void *handle, const char *name, PropertyCallback get, PropertyCallback set, void *data) {
     int value = 0;
+    if (getenv("FAKE_REGISTER_FAIL")) return 1;
     return strcmp(name, "frameworkStarted") || set || !get || get(handle, name, &value, data) || value != 1;
 }
 int LipcSubscribeExt(void *handle, const char *source, const char *name, EventCallback callback, void *data) {
@@ -56,10 +57,15 @@ int LipcSetIntProperty(void *handle, const char *source, const char *name, int v
 }
 int LipcSetStringProperty(void *handle, const char *source, const char *name, const char *value) {
     (void)handle; (void)source; (void)name; (void)value;
-    return getenv("FAKE_UNLOAD_FAIL") ? 1 : 0;
+    return 0;
 }
 int LipcGetStringProperty(void *handle, const char *source, const char *name, char **value) {
     (void)handle; (void)source; (void)name;
+    if (getenv("FAKE_OVERLAY_TIMEOUT")) {
+        fprintf(stderr, "overlay-query-timed-out\n");
+        *value = NULL;
+        return 15;
+    }
     *value = strdup("langpicker blankwindow");
     return *value ? 0 : 1;
 }

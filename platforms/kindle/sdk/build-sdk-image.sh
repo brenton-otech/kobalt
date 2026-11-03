@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=$(cd "$(dirname "$0")/../../.." && pwd)
-image="localhost/kobuild:kindle"
-
-echo "Building Kindle SDK image: $image..."
-docker build --platform linux/amd64 -f "$root/platforms/kindle/sdk/Dockerfile.kindle" -t "$image" "$root"
-echo "Kindle SDK image built successfully: $image"
+echo 'Kindle SDK production belongs to kobuild. Run ./build.sh kindle there for PW5, or ./build.sh kindle-pw3 for PW3.' >&2
+exit 1
