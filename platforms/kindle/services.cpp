@@ -79,6 +79,9 @@ ReaderHostServices readerServices(std::shared_ptr<Device> device) {
         changed(device->state().wifi);
         QObject::connect(device.get(), &Device::wifiChanged, context, [device, changed] { changed(device->state().wifi); });
     };
+    result.setWifiEnabled = [device](bool enabled) {
+        device->setWirelessEnabled(enabled);
+    };
     result.observeBluetooth = [device](QObject *context, std::function<void(bool)> changed) {
         changed(device->state().bluetoothConnected);
         QObject::connect(device.get(), &Device::bluetoothChanged, context, [device, changed] { changed(device->state().bluetoothConnected); });

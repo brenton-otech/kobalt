@@ -306,6 +306,9 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
         });
     if (services.observeWifi)
         services.observeWifi(this, [this](WifiStatus state) {
+            wifiRadioEnabled = state.enabled;
+            if (airplaneModeOption)
+                airplaneModeOption->setChecked(!state.enabled);
             if (menuWifi->setStatus(state.enabled, state.connected, state.strength) &&
                 topControls->isVisible() && !lifecycleHidden)
                 syncNavigation();
@@ -1131,6 +1134,7 @@ void Reader::buildSettings() {
     settingsInputs.warmthSupported = warmthSupported;
     settingsInputs.sleepScreenSupported = presentation->supportsSleepScreen();
     settingsInputs.automaticBookOpeningSupported = services.automaticBookOpening && services.setAutomaticBookOpening;
+    settingsInputs.wifiControlSupported = services.observeWifi && services.setWifiEnabled;
 #ifndef KOBALT_READER_HARDWARE
     settingsInputs.debugProgressAvailable = true;
 #endif
@@ -1207,6 +1211,7 @@ void Reader::buildSettings() {
     });
     minimalAnnotationOption = settings->minimalAnnotationOption;
     automaticOpeningOption = settings->automaticOpeningOption;
+    airplaneModeOption = settings->airplaneModeOption;
     hideTabLabelsOption = settings->hideTabLabelsOption;
     linkIndicatorOption = settings->linkIndicatorOption;
     hideNonlinearOption = settings->hideNonlinearOption;
@@ -1343,6 +1348,11 @@ void Reader::buildSettings() {
     connect(automaticOpeningOption, &QCheckBox::clicked, this, [this](bool enabled) {
         applyAutomaticOpening(enabled);
     });
+    if (airplaneModeOption)
+        connect(airplaneModeOption, &QCheckBox::clicked, this, [this](bool airplane) {
+            // The option keeps its new state until the host reports the radios.
+            services.setWifiEnabled(!airplane);
+        });
     connect(refreshButton, &QPushButton::clicked, this, [this] {
         openScreenRefresh();
     });

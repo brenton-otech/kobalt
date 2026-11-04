@@ -34,6 +34,7 @@ struct SettingsPanelInputs {
     bool downloadableDictionaries = true;
     bool sleepScreenSupported = false;
     bool automaticBookOpeningSupported = false;
+    bool wifiControlSupported = false;
 };
 // Qt parents own every widget. Reader installs policy callbacks after construction.
 class SettingsPanel final : public ui::Panel {
@@ -86,6 +87,8 @@ public:
     ui::DescribedOption *linkIndicatorOption = nullptr, *hideNonlinearOption = nullptr,
                         *avoidWastefulStylingOption = nullptr;
     ui::DescribedOption *automaticOpeningOption = nullptr, *minimalAnnotationOption = nullptr;
+    // Null unless the host can switch its wireless radios.
+    ui::DescribedOption *airplaneModeOption = nullptr;
     ui::CaptionButton *defaultFontButton = nullptr, *uiFontButton = nullptr, *uiMonoFontButton = nullptr,
                       *headerFooterFontButton = nullptr, *headerFooterWeightButton = nullptr;
     ui::CaptionButton *serifFontButton = nullptr, *sansFontButton = nullptr, *monoFontButton = nullptr;

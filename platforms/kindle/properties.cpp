@@ -32,14 +32,26 @@ void Properties::read(Property property, Finished finished) {
     if (!active)
         startNext();
 }
+void Properties::writeAsync(Property property, int value, Finished finished) {
+    if (stopped || !property.integer) {
+        finished({});
+        return;
+    }
+    queued.enqueue({std::move(property), std::move(finished), value});
+    if (!active)
+        startNext();
+}
 void Properties::startNext() {
     if (stopped || active || queued.isEmpty())
         return;
     current = queued.dequeue();
     active = true;
     expired = false;
-    process.setProgram(commands.get);
-    process.setArguments(arguments(current.property));
+    auto args = arguments(current.property);
+    if (current.value)
+        args.append(QString::number(*current.value));
+    process.setProgram(current.value ? commands.set : commands.get);
+    process.setArguments(args);
     deadline.start(commands.timeoutMilliseconds);
     process.start();
 }

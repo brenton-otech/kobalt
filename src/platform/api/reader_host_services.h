@@ -31,7 +31,8 @@ struct WifiStatus {
 // across sleep and capability changes. Factories return independently owned
 // non-null controllers; they never return a borrowed native handle. Every
 // callback except automaticBookOpening, setAutomaticBookOpening,
-// debugProgressAction, observeBattery, observeBluetooth, observeWifi, remoteKeyActivity and syncNetwork is required,
+// debugProgressAction, observeBattery, observeBluetooth, observeWifi, setWifiEnabled, remoteKeyActivity and
+// syncNetwork is required,
 // including unsupported hosts.
 // A notice in the reader's usual notice card. `name` is the card's object
 // name; its message and button add `Message` and `Confirm`.
@@ -70,6 +71,10 @@ struct ReaderHostServices {
     // context and reports cached state without blocking the reader thread.
     std::function<void(QObject *context, std::function<void(bool)> changed)> observeBluetooth;
     std::function<void(QObject *context, std::function<void(WifiStatus)> changed)> observeWifi;
+    // Optional radio control; requires observeWifi. The host turns wireless
+    // radios on or off without blocking the reader thread and reports the
+    // outcome through observeWifi, including when the change fails.
+    std::function<void(bool enabled)> setWifiEnabled;
     // Report consumed key activity to the host. The host identifies remote
     // input and retains its own radio inactivity policy.
     std::function<void(QObject *context, QKeyEvent *event)> remoteKeyActivity;

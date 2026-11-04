@@ -517,6 +517,14 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
                                                    : strings::get("settings.unsupported_description"));
     automaticOpeningOption->setEnabled(inputs.automaticBookOpeningSupported);
     systemRows->addWidget(automaticOpeningOption);
+    // Only hosts that can switch their radios show this section, so other
+    // devices keep their existing System page.
+    if (inputs.wifiControlSupported) {
+        section(systemPage, systemRows, "rrSystemWirelessSection", strings::get("settings.section_wireless"));
+        airplaneModeOption = check(systemPage, "rrAirplaneMode", strings::get("settings.airplane_mode"),
+                                   strings::get("settings.airplane_mode_description"));
+        systemRows->addWidget(airplaneModeOption);
+    }
     section(systemPage, systemRows, "rrSystemSleepSection", strings::get("settings.section_sleep"));
     sleepScreenButton =
         ui::makeCaptionButton(systemPage, nullptr, "rrSleepScreen", strings::get("settings.sleep_screen"), [] {});

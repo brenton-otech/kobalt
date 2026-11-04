@@ -96,8 +96,14 @@ fi
 cat "$root/$4"
 )SH", true);
     write(root + "/set", prefix + R"SH(
+if [ -f "$root/fail-set-$4" ]; then
+    rm "$root/fail-set-$4"
+    exit 1
+fi
 [ "$5" != 99 ] || exit 1
 printf '%s\n' "$5" > "$root/$4"
+# Stock airplane mode switches the radio that wifid reports.
+[ "$4" != wirelessEnable ] || printf '%s\n' "$5" > "$root/enable"
 )SH", true);
     Properties::Commands commands{root + "/get", root + "/set", 500};
     {
@@ -180,6 +186,21 @@ printf '%s\n' "$5" > "$root/$4"
     write(root + "/fail-currentAmberLevel", "1");
     check(light->setWarmth(18) == -1 && !light->saveWarmth(), "Unconfirmed warmth was reported saved");
     check(light->setWarmth(12) == 12 && light->saveWarmth(), "Warmth rollback after failed readback");
+    bool wifiReported = false;
+    auto radio = QObject::connect(device.get(), &Device::wifiChanged, [&] { wifiReported = true; });
+    device->setWirelessEnabled(false);
+    check(wait([&] { return wifiReported && !device->state().wifi.enabled; }, 5000) && read(root + "/wirelessEnable") == "0",
+          "Airplane mode did not reach lipc or report the disabled radio");
+    wifiReported = false;
+    write(root + "/fail-set-wirelessEnable", "1");
+    device->setWirelessEnabled(true);
+    check(wait([&] { return wifiReported; }) && !device->state().wifi.enabled && read(root + "/wirelessEnable") == "0",
+          "A failed radio change was not reported with the unchanged state");
+    wifiReported = false;
+    device->setWirelessEnabled(true);
+    check(wait([&] { return wifiReported && device->state().wifi.enabled; }, 5000) && read(root + "/wirelessEnable") == "1",
+          "Leaving airplane mode did not report the enabled radio");
+    QObject::disconnect(radio);
     light.reset();
     device->stop();
     device.reset();
@@ -211,6 +232,6 @@ printf '%s\n' "$5" > "$root/$4"
     qunsetenv("KOBALT_KINDLE_USB_NETWORK");
     device->stop();
     device.reset();
-    std::puts("Kindle device parsing, bounded IPC, light readback, commit and cancellation passed.");
+    std::puts("Kindle device parsing, bounded IPC, light readback, commit, cancellation and airplane mode passed.");
     return 0;
 }

@@ -28,6 +28,8 @@ public:
     void stop();
     int setBrightness(int percent);
     int setWarmth(int level);
+    // Stock airplane mode. Reports through wifiChanged without blocking.
+    void setWirelessEnabled(bool enabled);
     bool warmthVerified() const { return warmthConfirmed; }
     void startLifecycle(const QString &program);
     void activity();

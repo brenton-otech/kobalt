@@ -309,6 +309,8 @@ void Reader::openSettings() {
     showMenuView();
     if (services.automaticBookOpening)
         automaticOpeningOption->setChecked(services.automaticBookOpening());
+    if (airplaneModeOption)
+        airplaneModeOption->setChecked(!wifiRadioEnabled);
     screenRefreshMode = kobalt::screenRefresh(preferences.value("screen_refresh").toString());
     showScreenRefresh();
     fitSettings();

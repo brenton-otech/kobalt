@@ -3190,6 +3190,39 @@ private slots:
         QTRY_VERIFY(wifi->isVisible());
         wifiChanged({false, false, -1});
         QTRY_VERIFY(!wifi->isVisible());
+        QVERIFY2(!host.window()->findChild<QWidget *>("rrAirplaneMode"),
+                 "Hosts without radio control must keep their System page unchanged");
+    }
+    void airplaneModeFollowsReportedRadio() {
+        ReaderFixture host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        std::function<void(WifiStatus)> wifiChanged;
+        QList<bool> requests;
+        host.configureServices = [&](ReaderHostServices &services) {
+            services.observeWifi = [&](QObject *, std::function<void(WifiStatus)> changed) {
+                wifiChanged = changed;
+                changed({true, true, 4});
+            };
+            services.setWifiEnabled = [&](bool enabled) { requests.append(enabled); };
+        };
+        QSignalSpy opened(&host, &ReaderFixture::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        auto *option = host.window()->findChild<QCheckBox *>("rrAirplaneMode");
+        QVERIFY(option && host.window()->findChild<QWidget *>("rrSystemWirelessSection"));
+        QVERIFY(!option->isChecked());
+        // The host has not answered yet, so the option keeps the user's choice.
+        option->click();
+        QCOMPARE(requests, QList<bool>{false});
+        QVERIFY(option->isChecked());
+        wifiChanged({false, false, -1});
+        QVERIFY(option->isChecked());
+        option->click();
+        QCOMPARE(requests, (QList<bool>{false, true}));
+        QVERIFY(!option->isChecked());
+        // A failed change reports the unchanged radio and restores the option.
+        wifiChanged({false, false, -1});
+        QVERIFY(option->isChecked());
     }
     void remoteKeyActivityRequiresActiveReading() {
         ReaderFixture host(testPaths(), testFonts, testPlaceholder);

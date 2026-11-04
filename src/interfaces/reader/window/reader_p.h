@@ -305,6 +305,10 @@ private:
     kobalt::LightPanel *lightPopup = nullptr;
     QCheckBox *darkOption, *inheritTextLayoutOption, *animationOption, *edgeLightOption, *denseGraphOption;
     QCheckBox *automaticOpeningOption = nullptr, *minimalAnnotationOption = nullptr, *hideTabLabelsOption = nullptr;
+    // Null unless the host supplies setWifiEnabled. The last reported radio
+    // state restores the option when settings open after a failed change.
+    QCheckBox *airplaneModeOption = nullptr;
+    bool wifiRadioEnabled = false;
     QPushButton *autoRotateOption;
     bool hideNativeStatus() const;
     QJsonObject preferences;

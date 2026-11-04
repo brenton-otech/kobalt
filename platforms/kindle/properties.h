@@ -5,6 +5,7 @@
 #include <QQueue>
 #include <QTimer>
 #include <functional>
+#include <optional>
 
 namespace kobalt::kindle {
 struct Property {
@@ -30,12 +31,18 @@ public:
     ~Properties() override;
     using Finished = std::function<void(PropertyReply)>;
     void read(Property property, Finished finished);
+    // Queued with status reads; the reply reports whether lipc accepted it.
+    void writeAsync(Property property, int value, Finished finished);
     PropertyReply readNow(const Property &property, int milliseconds);
     bool write(const Property &property, int value, int milliseconds);
     void stop();
     int timeout() const { return commands.timeoutMilliseconds; }
 private:
-    struct Request { Property property; Finished finished; };
+    struct Request {
+        Property property;
+        Finished finished;
+        std::optional<int> value;
+    };
     Commands commands;
     QProcess process;
     QTimer deadline;

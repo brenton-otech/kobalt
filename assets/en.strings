@@ -651,6 +651,8 @@
 "settings.system" = "System";
 "settings.automatic_book_opening" = "Open books automatically in Kobalt";
 "settings.automatic_book_opening_description" = "Use Kobalt when opening supported books from your library. This is the same setting as in Kobo's Reading settings.";
+"settings.airplane_mode" = "Airplane mode";
+"settings.airplane_mode_description" = "Turns off Wi-Fi to save battery. Syncing needs Wi-Fi.";
 "settings.sleep_screen" = "Sleep screen";
 "settings.session_timeout" = "New session after sleep";
 "settings.session_timeout_description" = "Waking your device after this amount of time starts a new reading session. You do not need to close and reopen your book, this is automatic.";
@@ -698,6 +700,7 @@
 "settings.widows_orphans_allow" = "Allow both";
 "settings.section_reading_menu" = "Reading menu";
 "settings.section_reader" = "Reader";
+"settings.section_wireless" = "Wireless";
 "settings.section_sleep" = "Sleep and wake";
 "settings.navigation_taps_and_swipes" = "Swipes and taps";
 "settings.navigation_taps_and_swipes_description" = "Default";

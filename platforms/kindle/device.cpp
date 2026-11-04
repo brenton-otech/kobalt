@@ -243,6 +243,25 @@ int Device::setBrightness(int percent) {
 int Device::setWarmth(int level) {
     return state_.hasWarmth() ? setLight("currentAmberLevel", level, 24) : -1;
 }
+void Device::setWirelessEnabled(bool enabled) {
+    // The stock Airplane Mode switch writes this property. It controls every
+    // radio the model has, and wifid reconnects to a known network by itself.
+    QPointer<Device> guard(this);
+    properties.writeAsync({QStringLiteral("com.lab126.cmd"), QStringLiteral("wirelessEnable")}, enabled ? 1 : 0,
+                          [this, guard, enabled](PropertyReply reply) {
+        if (!guard)
+            return;
+        if (!reply.ok) {
+            qWarning().noquote() << "Kindle wireless" << (enabled ? "enable" : "disable") << "failed";
+            // Unchanged state: the reader restores its option from the last report.
+            emit wifiChanged();
+            return;
+        }
+        refresh();
+        // wifid applies the change after lipc returns, so read it again once it settles.
+        QTimer::singleShot(3000, this, &Device::refresh);
+    });
+}
 void Device::stop() {
     stopped = true;
     poll.stop();
