@@ -40,6 +40,9 @@ kobalt::headerfooter::Values Reader::chromeValues() {
     values.title = model->title();
     values.author = model->author();
     values.chapter = model->chapterTitle().isEmpty() ? strings::get("reader.reading") : model->chapterTitle();
+    // A Bible names its current verse wherever the chapter field is shown.
+    if (const auto reference = model->bibleInfo().label(model->bibleReference()); !reference.isEmpty())
+        values.chapter = reference;
     values.time = services.clock();
     values.chapterPage = model->chapterPage();
     values.chapterPages = model->chapterPages();

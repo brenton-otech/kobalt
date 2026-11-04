@@ -38,6 +38,8 @@ struct ReaderMarkupFrame {
     int resolvedRanges = 0;
 };
 struct ReaderFrame {
+    BibleInfo bible;
+    BibleReference bibleReference;
     int turnDirection = 0;
     QImage image;
     ReaderMarkupFrame markup;
@@ -146,6 +148,8 @@ public:
     void cancelPendingTurn();
     bool go(int page);
     bool goTo(const QString &anchor);
+    const BibleInfo &bibleInfo() const { return frame.bible; }
+    BibleReference bibleReference() const { return frame.bibleReference; }
     bool goToNative(const QString &location, std::function<void(QString)> finished);
     bool goToSyncedPosition(const QString &position, std::function<void(QString)> finished);
     // Resolves chapter and source order without navigating or rendering another page.

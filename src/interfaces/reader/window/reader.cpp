@@ -961,6 +961,7 @@ void Reader::hideEvent(QHideEvent *event) {
 }
 
 void Reader::resizeEvent(QResizeEvent *) {
+    if (biblePicker) biblePicker->setGeometry(rect());
     annotationFrame.clear();
     if (annotationPopover)
         annotationPopover->hide();
@@ -1691,6 +1692,7 @@ void Reader::syncNavigation() {
 }
 
 void Reader::showControls() {
+    biblePicker->hide();
     const bool topVisible = topControls->isVisible();
     const bool opening = !topVisible && !bottomControls->isVisible();
     kobalt::ui::PanelTiming timing("menu");
@@ -1749,6 +1751,7 @@ void Reader::showControls() {
 }
 
 void Reader::dismissControls() {
+    biblePicker->hide();
     if (pageScrubber)
         pageScrubber->cancel();
     hideRevealedLinks();
@@ -1798,6 +1801,7 @@ void Reader::toggleLight() {
 }
 
 void Reader::showChapters() {
+    if (model->bibleInfo().valid()) { showBiblePicker(); return; }
     model->cancelPendingTurn();
     lightPopup->hide();
     chapterGraph->hide();
@@ -1887,6 +1891,7 @@ void Reader::pageButton(int direction) {
     const auto *modal = QApplication::activeModalWidget();
     if (modal && modal != this)
         return;
+    if (biblePicker->isVisible()) { ui::turnVisiblePageControl(biblePicker, direction); return; }
     if (pageList(direction))
         return;
     if (seekOpen && pageScrubber && pageScrubber->isVisible()) {

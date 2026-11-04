@@ -78,7 +78,7 @@ void Reader::refresh() {
     // The panel needs far longer to draw a page than this function needs
     // for the rest of its work. On a plain page turn, paint now and let the
     // controls, the chapter graph and the saved position follow.
-    const bool readingTurn = isVisible() && !appearanceEdit.panelOpen() && !topControls->isVisible() &&
+    const bool readingTurn = isVisible() && !biblePicker->isVisible() && !appearanceEdit.panelOpen() && !topControls->isVisible() &&
                              !general->isVisible() && !choices->isVisible() && !syncDialog && !kosyncDialog && !finishDialog &&
                              !services.suspended() && !applyingText && !model->busy() && model->turnDirection() != 0 &&
                              nextImage.cacheKey() != previousPageImage;
@@ -380,7 +380,9 @@ void Reader::syncReadingControls() {
     pageScrubber->setChapterJumps(pageNavigation::barButtons(preferences) == pageNavigation::BarButtons::Chapters);
     pageScrubber->setBook(model->page(), model->pages(), chapters, model->image().size());
     pageScrubber->setEnabled(!model->busy() && model->pages() > 1);
-    const auto chapter = model->chapterTitle().isEmpty() ? strings::get("reader.contents") : model->chapterTitle();
+    auto chapter = model->chapterTitle().isEmpty() ? strings::get("reader.contents") : model->chapterTitle();
+    if (const auto reference = model->bibleInfo().label(model->bibleReference()); !reference.isEmpty())
+        chapter = reference;
     chapterButton->setText(chapter);
     chapterButton->setAccessibleName(strings::get("reader.contents_detail").arg(chapter));
     page->progressFraction = pageProgressFraction(model->page(), model->pages());

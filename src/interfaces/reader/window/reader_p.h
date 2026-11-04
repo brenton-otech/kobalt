@@ -6,6 +6,7 @@
 #include "interfaces/reader/ui/controls/sliders.h"
 #include "interfaces/reader/ui/controls/page_scrubber.h"
 #include "interfaces/reader/ui/controls/panels.h"
+#include "interfaces/reader/panels/bible_picker.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "interfaces/reader/ui/style/theme.h"
 #include "interfaces/reader_window.h"
@@ -290,6 +291,8 @@ private:
     kobalt::ui::BluetoothIndicator *menuBluetooth;
     kobalt::ui::WifiIndicator *menuWifi;
     kobalt::ReadingPage *page;
+    BiblePicker *biblePicker = nullptr;
+    void showBiblePicker();
     ChapterHeader *header;
     AppearanceSheet *menu;
     QFrame *bottomControls;

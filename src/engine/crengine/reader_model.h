@@ -1,6 +1,7 @@
 #pragma once
 #include "publication/opening_result.h"
 #include "reading/chapter.h"
+#include "reading/bible.h"
 #include "assets/font_catalog.h"
 #include <QByteArray>
 #include <QImage>
@@ -154,6 +155,9 @@ public:
     // skip other non-linear sections. Returns `from` at either end.
     int turnTarget(int from, int delta) const;
     bool goTo(const QString &position);
+    BibleInfo bibleInfo();
+    BibleReference bibleReference();
+    QString biblePosition(BibleReference ref);
     QString platformPosition(const PositionCodec &codec, QString *error) const;
     bool goToPlatform(const PositionCodec &codec, const QString &location, QString *error);
     // Where goToPlatformNearest opened: the saved position, the start of its
@@ -290,6 +294,9 @@ private:
     QJsonObject openingTimes_;
     std::unique_ptr<ColumnView> engine_;
     struct SourceIndex;
+    struct BibleNavigation;
+    std::shared_ptr<BibleNavigation> bible_;
+    void prepareBible();
     friend struct ReaderSourceIndexProbe;
     mutable std::shared_ptr<SourceIndex> sourceIndex_;
     std::shared_ptr<SourceIndex> sourceIndex(const QStringList &positions, const std::function<bool()> &current = {}) const;

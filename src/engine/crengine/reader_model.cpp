@@ -661,6 +661,10 @@ int ReaderModel::turnTarget(int from, int delta) const {
 bool ReaderModel::goTo(const QString &position) {
     if (!engine_)
         return false;
+    if (position.startsWith("bible:")) {
+        const auto target = biblePosition(bibleInfo().reference(position.mid(6)));
+        return !target.isEmpty() && goTo(target);
+    }
     auto pointer = engine_->getDocument()->createXPointer(cre(position));
     if (pointer.isNull())
         return false;

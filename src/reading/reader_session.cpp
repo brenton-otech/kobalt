@@ -173,6 +173,8 @@ ReaderFrame capture(ReaderModel &model, const PositionCodec &positions, bool nei
     result.markup = captureFrameMarkup(model, markup, markupGeneration, result.image.cacheKey());
     result.links = model.pageLinks();
     result.state = model.state();
+    result.bible = model.bibleInfo();
+    result.bibleReference = model.bibleReference();
     result.nativePosition = model.platformPosition(positions, &result.nativePositionError);
     captureChapters(result, model);
     result.state["page"] = model.page();

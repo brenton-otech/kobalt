@@ -23,6 +23,7 @@
 #include <QFontDatabase>
 #include <QScreen>
 #include <QSocketNotifier>
+#include <QPushButton>
 #include <QTimer>
 #include <cerrno>
 #include <csignal>
@@ -121,12 +122,14 @@ int main(int argc, char **argv) {
                       QDir(QCoreApplication::applicationDirPath()).filePath("assets")});
     parser.addOption({"book", "Open this EPUB after starting.", "file"});
     parser.addOption({"smoke-test", "Open --book, turn a page, save, reopen and exit. Requires --profile."});
+    parser.addOption({"bible-check", "With --smoke-test, first open John 3:16 through the Bible picker."});
 #ifdef KOBALT_KINDLE_NATIVE_TESTING
     parser.addOption({"preview", "Show a scaled, interactive PW5 preview in a Mac window."});
     parser.addOption({"screenshots", "Capture PW5 screens headlessly. Requires --profile and --book.", "directory"});
 #endif
     parser.process(app);
     const bool smoke = parser.isSet("smoke-test");
+    const bool bibleCheck = parser.isSet("bible-check");
 #ifdef KOBALT_KINDLE_NATIVE_TESTING
     const bool captures = parser.isSet("screenshots"), preview = parser.isSet("preview");
     if (captures && (!parser.isSet("profile") || !parser.isSet("book") || smoke || preview)) {
@@ -234,12 +237,14 @@ int main(int argc, char **argv) {
             int stage = 0;
             QString position, initialPosition;
             QByteArray initialImage, turnedImage;
+            int bible = 0;
             bool failed = false;
 #ifdef KOBALT_KINDLE_NATIVE_TESTING
             bool retirementChecked = false;
 #endif
         };
         auto state = std::make_shared<SmokeState>();
+        state->bible = bibleCheck ? 1 : 0;
         auto fail = [&window, state](const QString &message) {
             if (state->failed)
                 return;
@@ -251,6 +256,67 @@ int main(int argc, char **argv) {
                 window.closeBook();
         };
         QObject::connect(&window, &kindle::Window::bookFailed, &window, fail);
+        // Drives the real Contents button and Bible picker by visible labels.
+        // Step 1 opens John 3:16; step 2 accepts the page once it shows John 3.
+        const auto bibleStep = [captureDir = qEnvironmentVariable("KOBALT_KINDLE_CHECK_CAPTURE_DIR")](QWidget *reader, int &step, const std::function<void(const QString &)> &failed) {
+            const auto capture = [&captureDir](QWidget *widget, const QString &name) {
+                if (!captureDir.isEmpty() && QDir().mkpath(captureDir))
+                    widget->grab().save(QDir(captureDir).filePath(name + QStringLiteral(".png")));
+            };
+            auto *chapters = reader->findChild<QPushButton *>("rrChapters");
+            if (step == 2) {
+                const auto text = chapters ? chapters->text() : QString();
+                if (!text.startsWith(QStringLiteral("John 3:")))
+                    return true;
+                if (text.section(':', 1).toInt() < 1 || text.section(':', 1).toInt() > 16) {
+                    failed(QStringLiteral("Bible reference after John 3:16 was ") + text);
+                    return false;
+                }
+                qInfo().noquote() << "Kindle Bible picker opened" << text;
+                capture(reader, QStringLiteral("bible-4-page"));
+                step = 3;
+                return true;
+            }
+            auto *picker = reader->findChild<QWidget *>("rrBiblePicker");
+            if (!chapters || !picker) {
+                failed(QStringLiteral("Bible picker is unavailable"));
+                return false;
+            }
+            chapters->click();
+            if (!picker->isVisible()) {
+                failed(QStringLiteral("Contents did not open the Bible picker for a Bible"));
+                return false;
+            }
+            if (auto *testament = picker->findChild<QPushButton *>("rrBibleTestamentNT"))
+                testament->click();
+            capture(reader, QStringLiteral("bible-1-books"));
+            int stage = 1;
+            for (const auto &label : {QStringLiteral("John"), QStringLiteral("3"), QStringLiteral("16")}) {
+                QPushButton *target = nullptr;
+                for (int turn = 0; !target && turn < 40; ++turn) {
+                    for (auto *button : picker->findChildren<QPushButton *>())
+                        if (button->isVisible() && button->accessibleName() == label &&
+                            button->objectName().startsWith(QStringLiteral("rrBible")))
+                            target = button;
+                    auto *next = picker->findChild<QPushButton *>("rrBibleNext");
+                    if (!target && next && next->isVisible())
+                        next->click();
+                }
+                if (!target) {
+                    failed(QStringLiteral("Bible picker has no ") + label);
+                    return false;
+                }
+                target->click();
+                if (++stage <= 3)
+                    capture(reader, stage == 2 ? QStringLiteral("bible-2-chapters") : QStringLiteral("bible-3-verses"));
+            }
+            if (picker->isVisible()) {
+                failed(QStringLiteral("Bible picker stayed open after choosing a verse"));
+                return false;
+            }
+            step = 2;
+            return true;
+        };
         auto *poll = new QTimer(&window);
         poll->setInterval(200);
         QObject::connect(&window, &kindle::Window::bookOpened, &window, [&window, state, poll] {
@@ -258,7 +324,7 @@ int main(int argc, char **argv) {
             state->stage = state->stage == 2 ? 3 : 1;
             poll->start();
         });
-        QObject::connect(poll, &QTimer::timeout, &window, [&window, state, poll, book, fail, preview] {
+        QObject::connect(poll, &QTimer::timeout, &window, [&window, state, poll, book, fail, preview, bibleStep] {
             if (state->failed || !window.readerWindow())
                 return;
             auto *reader = window.readerWindow();
@@ -280,6 +346,12 @@ int main(int argc, char **argv) {
             if (position.isEmpty())
                 return;
             if (state->stage == 1) {
+                if (state->bible == 1 || state->bible == 2) {
+                    if (!bibleStep(reader, state->bible, fail))
+                        return;
+                    if (state->bible != 3)
+                        return;
+                }
                 if (state->initialImage.isEmpty()) {
                     state->initialPosition = position;
                     state->initialImage = imageHash;
@@ -369,7 +441,8 @@ int main(int argc, char **argv) {
                 window.close();
             }
         });
-        QTimer::singleShot(60000, &window, [fail] { fail(QStringLiteral("60 second timeout")); });
+        // Parsing the whole Bible under ARM emulation takes far longer than the type tester.
+        QTimer::singleShot(bibleCheck ? 480000 : 60000, &window, [fail] { fail(QStringLiteral("smoke timeout")); });
     }
     if (parser.isSet("book") && !captures)
         QTimer::singleShot(0, &window, [&window, book, smoke, folderCheckRoot] {

@@ -79,6 +79,14 @@
 "library.search_placeholder" = "Title, author or series";
 "library.close_search" = "Close search";
 "library.add_folder" = "Add folder";
+"bible.books" = "Bible books";
+"bible.close" = "Close Bible navigation";
+"bible.choose_book" = "Choose a book";
+"bible.choose_chapter" = "Choose a chapter";
+"bible.choose_verse" = "Choose a verse";
+"bible.old_testament" = "Old Testament";
+"bible.new_testament" = "New Testament";
+"bible.apocrypha" = "Apocrypha";
 "library.use_folder" = "Use this folder";
 "library.parent_folder" = "Parent folder";
 "library.folder_picker_description" = "EPUBs in subfolders are included.";

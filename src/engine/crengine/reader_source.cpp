@@ -412,6 +412,7 @@ bool ReaderModel::openSource(std::shared_ptr<ReaderSource> source, QSize size, c
         source->container = LVContainerRef(new ContentContainer(source->container));
     }
     OpeningCallback callback(engine_, std::move(progress));
+    bible_.reset();
     source_ = std::move(source);
     openingTimes_["model_prepare_ms"] = double(phase.restart());
     bool loaded;

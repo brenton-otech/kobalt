@@ -362,6 +362,11 @@ void Reader::buildReadingPage() {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     page = new kobalt::ReadingPage(this, services.cancelAnimation);
+    biblePicker = new BiblePicker(this);
+    biblePicker->selected = [this](const QString &target) {
+        if (model->goTo(target)) dismissControls();
+    };
+    biblePicker->dismissed = [this] { refresh(); };
     layout->addWidget(page, 1);
     page->setFont(kobalt::ui::headerFooterFont());
     readerStyle(page, "font-family:@header-footer-font@;");

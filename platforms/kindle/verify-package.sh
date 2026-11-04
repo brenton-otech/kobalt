@@ -58,6 +58,7 @@ if [[ "${1:-}" != --inside ]]; then
     [[ -f "$root/build/$output/package/kobalt/bin/kobalt" ]] || fail 'build/package the selected ARM app first'
     image=$(bash "$root/platforms/kindle/sdk/prepare-runtime-image.sh")
     exec docker run --rm --pull=never --init \
+        -e "KOBALT_KINDLE_BIBLE_CHECK=${KOBALT_KINDLE_BIBLE_CHECK:-}" \
         --label kobalt.purpose=kindle-userspace-check \
         -v "$root:/work" -v "$root/build/$fixture:/fixture" \
         --workdir /work "$image" bash /work/platforms/kindle/verify-package.sh --inside "$target"
@@ -150,3 +151,29 @@ cat "$log"
 grep -q 'Kindle smoke passed:' "$log" || fail 'ARM app exited without the smoke completion marker'
 [[ -s "$profile/data/config/kobalt.sqlite" ]] || fail 'ARM smoke did not create its SQLite profile'
 echo 'ARM userspace smoke passed. This check does not exercise framebuffer, input, suspend or stock UI.'
+
+# Optional: the World English Bible fixture is large, so qemu takes longer.
+if [[ "${KOBALT_KINDLE_BIBLE_CHECK:-}" == 1 ]]; then
+    rm -rf "$profile/data" "$profile/tmp"
+    mkdir -p "$profile/tmp"
+    log=$build/arm-bible.log
+    result=0
+    timeout --signal=TERM --kill-after=10s 600s qemu-arm -cpu "$qemu_cpu" -L "$sysroot" \
+        -E "LD_LIBRARY_PATH=$app/lib" \
+        -E QT_QPA_PLATFORM=offscreen \
+        -E KOBALT_STRICT_MAIN_THREAD=1 \
+        -E "KOBALT_KINDLE_CHECK_CAPTURE_DIR=$build/bible-captures" \
+        -E "QT_QPA_PLATFORM_PLUGIN_PATH=$build/sdk-platforms" \
+        -E "QT_PLUGIN_PATH=$app/plugins" \
+        -E "QT_QPA_FONTDIR=$profile/assets/fonts" \
+        -E "TMPDIR=$profile/tmp" \
+        -E "XDG_RUNTIME_DIR=$profile/runtime" \
+        "$app/bin/kobalt" --assets "$profile/assets" \
+        --smoke-test --bible-check --profile "$profile/data" --library /work/tests/fixtures \
+        --book /work/tests/fixtures/web-bible.epub >"$log" 2>&1 || result=$?
+    cat "$log"
+    [[ "$result" == 0 ]] || fail "ARM Bible smoke exited $result; see $log"
+    grep -q 'Kindle Bible picker opened' "$log" || fail 'ARM Bible smoke did not reach John 3'
+    grep -q 'Kindle smoke passed:' "$log" || fail 'ARM Bible smoke exited without the completion marker'
+    echo 'ARM Bible smoke passed: picker navigation, reference, page turn and restored position.'
+fi
