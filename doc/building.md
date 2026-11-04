@@ -187,6 +187,21 @@ After building `kindle-native`, run `bash platforms/kindle/preview.sh` from the 
 
 Run `bash platforms/kindle/capture.sh` to capture the library, keyboard pages, cover, body text and settings headlessly at PW5 resolution. It uses a temporary profile, removes that profile after the run, and writes grayscale PNGs, an overview and a checksum manifest to `build/screenshots/kindle/`. It replaces a previous capture set only after the new run completes and refuses an unrelated output directory. Native status is unavailable unless a test fixture supplies it; those screenshots do not show real device readings. Inspect the images before judging the UI. The native `kindle.preview` test also checks that scaling keeps the reader's PW5 layout dimensions and preserves rendered pages through save and reopen.
 
+Kindle Library's **Add folder** action opens the shared paged folder browser
+at `/mnt/us`. Navigate into a folder and choose **Use this folder** to save
+its reference and scan EPUBs recursively. Files are not copied or moved.
+Hidden folders, symbolic links and KOReader `.sdr` sidecars are omitted.
+The browser reads directories on a worker and validates the storage boundary
+again on selection. **Open a single book** uses the same browser, showing
+EPUBs alongside folders. Tapping an EPUB validates its location and opens it
+through the reader, retaining a reference in Library without copying the file.
+The package's isolated smoke check exercises the real pickers, recursive
+library scan, and single-book opening/checkpoint/reopen flow. Focused images remain under the selected Kindle
+output's `folder-picker-captures/`. Native shared UI checks include
+`libraryLocalFolderPicker` and `librarySingleBookPicker`. The full gallery
+includes folder selection, file selection, entry points, empty and unavailable
+states in the existing device and theme variants.
+
 For stock PW5 firmware emulation, prepare the headless emulator separately:
 
 ```sh

@@ -136,6 +136,7 @@ timeout --signal=TERM --kill-after=10s 180s qemu-arm -cpu "$qemu_cpu" -L "$sysro
     -E "LD_LIBRARY_PATH=$app/lib" \
     -E QT_QPA_PLATFORM=offscreen \
     -E KOBALT_STRICT_MAIN_THREAD=1 \
+    -E "KOBALT_KINDLE_CHECK_CAPTURE_DIR=$build/folder-picker-captures" \
     -E "QT_QPA_PLATFORM_PLUGIN_PATH=$build/sdk-platforms" \
     -E "QT_PLUGIN_PATH=$app/plugins" \
     -E "QT_QPA_FONTDIR=$profile/assets/fonts" \

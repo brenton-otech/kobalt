@@ -5,7 +5,9 @@ endif()
 string(RANDOM LENGTH 16 ALPHABET 0123456789abcdef suffix)
 set(profile "${BUILD}/test-tmp/smoke-${suffix}")
 file(MAKE_DIRECTORY "${profile}/tmp")
-set(book "${ROOT}/tests/fixtures/trevelyans-type-tester.kepub.epub")
+# The smoke opens its isolated Type Tester copy through the single-book
+# picker. Seed migration data for that same identity before the app starts.
+set(book "${profile}/data/folder-picker-fixture/SINGLE.EPUB")
 string(SHA256 book_key "file://${book}")
 set(legacy "${profile}/data/config/${book_key}.json")
 file(MAKE_DIRECTORY "${profile}/data/config")

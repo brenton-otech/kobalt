@@ -53,7 +53,7 @@ file(GLOB_RECURSE shared CONFIGURE_DEPENDS "${source}/*.cpp" "${source}/*.h")
 # The scenario player is built only into evaluation builds.
 list(FILTER shared EXCLUDE REGEX "/src/scenario/")
 list(REMOVE_ITEM shared "${source}/publication/loopback.cpp")
-set(adapters main.cpp window.cpp window.h services.cpp services.h display.cpp device.cpp device.h properties.cpp properties.h
+set(adapters main.cpp window.cpp window.h folder_browser.cpp folder_browser.h folder_picker_checks.cpp services.cpp services.h display.cpp device.cpp device.h properties.cpp properties.h
     ../android/reader.cpp ../android/reader.h ../android/start_screen.cpp ../android/start_screen.h)
 list(TRANSFORM adapters PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 qt_add_executable(kobalt_kindle ${shared} ${adapters})

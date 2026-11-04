@@ -1055,6 +1055,97 @@ private slots:
                 view->findChild<QPushButton *>("libraryFoldersBack")->click();
         }
     }
+    void libraryLocalFolderPicker_data() { variants(); }
+    void libraryLocalFolderPicker() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        library::Index index;
+        auto *view = new library::LibraryView(index, {});
+        view->setDark(dark);
+        Canvas canvas(view, QSize(ui::px(1072), ui::px(1448)));
+        canvas.resize(view->size());
+        canvas.show();
+        QCoreApplication::processEvents();
+        QString requested, selected;
+        view->browseFolder = [&](const QString &path) { requested = path; view->setFolderPickerLoading(path); };
+        view->chooseFolder = [&](const QString &path) { selected = path; };
+        auto button = [view](const char *name) { return view->findChild<QPushButton *>(name); };
+        view->showFolderPicker("/mnt/us");
+        QCOMPARE(requested, QString("/mnt/us"));
+        QVERIFY(!button("libraryFolderPickerUse")->isEnabled());
+        QStringList folders;
+        for (int i = 0; i < 20; ++i) folders.append(QString("/mnt/us/Folder %1").arg(i));
+        view->setFolderPickerLocation({"/mnt/us", {}, folders, {}});
+        QVERIFY(button("libraryFolderPickerUse")->isEnabled());
+        QVERIFY(!button("libraryFolderPickerUp")->isVisible());
+        QVERIFY(button("libraryFolderPickerNext")->isVisible());
+        QVERIFY(click(canvas, button("libraryFolderPickerNext")));
+        auto *row = button("libraryFolderPickerRow0");
+        const auto next = row->property("folderPath").toString();
+        QVERIFY(next != folders.first());
+        QVERIFY(click(canvas, row));
+        QCOMPARE(requested, next);
+        QVERIFY(!button("libraryFolderPickerUse")->isEnabled());
+        view->setFolderPickerLocation({next, "/mnt/us", {}, {}});
+        QVERIFY(!row->isVisible());
+        QVERIFY(button("libraryFolderPickerUp")->isVisible());
+        QVERIFY(click(canvas, button("libraryFolderPickerUse")));
+        QCOMPARE(selected, next);
+        QVERIFY(!view->findChild<QWidget *>("libraryFolderPicker")->isVisible());
+        view->showFolderPicker("/mnt/us");
+        view->setFolderPickerLocation({"/mnt/us/Missing", "/mnt/us", {}, "Unavailable"});
+        QVERIFY(!button("libraryFolderPickerUse")->isEnabled());
+        QVERIFY(click(canvas, button("libraryFolderPickerUp")));
+        QCOMPARE(requested, QString("/mnt/us"));
+        QVERIFY(view->dismiss());
+        view->setFolderPickerLocation({"/mnt/us", {}, folders, {}});
+        QVERIFY(!view->findChild<QWidget *>("libraryFolderPicker")->isVisible());
+        // The overlay must still cover the library after a viewport change.
+        view->showFolderPicker("/mnt/us");
+        canvas.resize(ui::px(1448), ui::px(1072));
+        QCoreApplication::processEvents();
+        QCOMPARE(view->findChild<QWidget *>("libraryFolderPicker")->geometry(), view->rect());
+    }
+    void librarySingleBookPicker_data() { variants(); }
+    void librarySingleBookPicker() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        library::Index index;
+        auto *view = new library::LibraryView(index, {});
+        view->setDark(dark);
+        Canvas canvas(view, QSize(ui::px(1072), ui::px(1448)));
+        canvas.resize(view->size());
+        canvas.show();
+        QCoreApplication::processEvents();
+        QString opened;
+        int foldersSelected = 0;
+        view->chooseBook = [&](const QString &path) { opened = path; };
+        view->chooseFolder = [&](const QString &) { ++foldersSelected; };
+        view->showBookPicker("/mnt/us/epubs");
+        view->setFolderPickerLocation({"/mnt/us/epubs", "/mnt/us", {"/mnt/us/epubs/Classics"}, {}, {"/mnt/us/epubs/Book.EPUB"}});
+        QVERIFY(!view->findChild<QPushButton *>("libraryFolderPickerUse")->isVisible());
+        auto *folder = static_cast<ui::ListRow *>(view->findChild<QPushButton *>("libraryFolderPickerRow0"));
+        auto *book = static_cast<ui::ListRow *>(view->findChild<QPushButton *>("libraryFolderPickerRow1"));
+        QCOMPARE(folder->accessoryValue().kind(), ui::ListRow::Accessory::Kind::Chevron);
+        QCOMPARE(book->accessoryValue().kind(), ui::ListRow::Accessory::Kind::None);
+        QVERIFY(click(canvas, book));
+        QCOMPARE(opened, QString("/mnt/us/epubs/Book.EPUB"));
+        QCOMPARE(foldersSelected, 0);
+        QVERIFY(!view->findChild<QWidget *>("libraryFolderPicker")->isVisible());
+        view->showBookPicker("/mnt/us/Empty");
+        view->setFolderPickerLocation({"/mnt/us/Empty", "/mnt/us", {}, {}});
+        QVERIFY(!folder->isVisible() && !book->isVisible());
+        QVERIFY(view->findChild<QWidget *>("libraryFolderPickerStatus")->isVisible());
+        QVERIFY(view->dismiss());
+        // Recycled EPUB rows must regain folder navigation in Add folder.
+        view->showFolderPicker("/mnt/us");
+        view->setFolderPickerLocation({"/mnt/us", {}, {"/mnt/us/Books"}, {}});
+        QVERIFY(view->findChild<QPushButton *>("libraryFolderPickerUse")->isVisible());
+        QVERIFY(!folder->property("isBook").toBool());
+        QCOMPARE(folder->accessoryValue().kind(), ui::ListRow::Accessory::Kind::Chevron);
+    }
     void libraryActionButtons_data() { variants(); }
     void libraryActionButtons() {
         QFETCH(bool, dark);
