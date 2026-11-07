@@ -63,6 +63,8 @@ file(WRITE "${app}/launcher/runtime-target" "${target}\n")
 foreach(name config.xml menu.json)
     configure_file("${CMAKE_CURRENT_LIST_DIR}/launcher/${name}" "${stage}/extensions/kobalt/${name}" COPYONLY)
 endforeach()
+# KPM-era jailbreaks without KUAL start Kobalt from this library scriptlet.
+configure_file("${CMAKE_CURRENT_LIST_DIR}/launcher/Kobalt.sh" "${stage}/documents/Kobalt.sh" COPYONLY)
 file(WRITE "${app}/bin/qt.conf" "[Paths]\nPrefix=..\nLibraries=lib\nPlugins=plugins\n")
 get_filename_component(root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 file(MAKE_DIRECTORY "${app}/licenses")
@@ -85,6 +87,6 @@ if(target STREQUAL pw3)
 else()
     set(package "Kobalt-kindle-prototype.zip")
 endif()
-execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cf "${BUILD}/${package}" --format=zip kobalt extensions
+execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cf "${BUILD}/${package}" --format=zip kobalt extensions documents
     WORKING_DIRECTORY "${stage}" COMMAND_ERROR_IS_FATAL ANY)
 message(STATUS "Kindle ${target} prototype: ${BUILD}/${package}")
