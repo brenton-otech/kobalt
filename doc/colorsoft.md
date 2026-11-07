@@ -5,7 +5,8 @@ This target packages the standalone Kindle reader for the Kindle Colorsoft
 the same hard-float SDK. The package has its own output, its own runtime
 preflight tag and a stock Colorsoft userspace fixture. The display adapter
 detects the color framebuffer at runtime.
-The PW3 softfp toolchain does not apply.
+The PW3 softfp toolchain does not apply. Besides the KUAL ZIP, the target
+produces a KPM package for the Véra jailbreak, which has no KUAL.
 
 ## Build contract
 
@@ -64,9 +65,12 @@ target modeled directly on `kindle-pw3`:
   glibc 2.12 headers.
 - `build.sh` accepts `kindle` and runs it as `linux/amd64`.
 
-That kobuild change has not been pushed. Until kobuild owns the target,
-`platforms/kindle/build.sh colorsoft` and the default PW5 build both fail
-with the existing "Prepare the Kindle SDK image in kobuild first" message.
+That change is commit `c5bc783` on the `fm/kindle-hf-sdk` branch of
+`brenton-otech/kobuild`. It is not yet merged into `main`. Until it is,
+prepare the image from that branch with `./build.sh kindle`. Without the
+image, `platforms/kindle/build.sh colorsoft` and the default PW5 build both
+fail with the existing "Prepare the Kindle SDK image in kobuild first"
+message.
 
 ## Commands
 
@@ -80,9 +84,56 @@ bash platforms/kindle/verify-package.sh colorsoft
 ```
 
 The output stays under `build/kindle-colorsoft/` and the firmware fixture under
-`build/kindle-colorsoft-sdk/`. The package is
-`build/kindle-colorsoft/Kobalt-kindle-colorsoft-prototype.zip`. PW5 and PW3
-keep their own commands, outputs, packages, fixtures and locks.
+`build/kindle-colorsoft-sdk/`. The build writes two packages with the same
+app files:
+
+- `build/kindle-colorsoft/Kobalt-kindle-colorsoft-prototype.kpkg` for KPM
+- `build/kindle-colorsoft/Kobalt-kindle-colorsoft-prototype.zip` for KUAL
+  or a manual install
+
+PW5 and PW3 keep their own commands, outputs, ZIP packages, fixtures and
+locks. They do not produce a KPM package.
+
+### KPM package
+
+KPM installs a gzip tar with `manifest.json` and optional `install.sh`,
+`launch.sh` and `uninstall.sh` hooks at its root. KPM runs the hooks with
+`sh` from the unpacked package folder, `/mnt/us/kmc/kpm/packages/kobalt/`.
+That folder is deleted and extracted again on every upgrade. The sources
+are KPM's
+[README](https://github.com/KindleModding/KPM/blob/main/README.md),
+`kpm-helper.py`, `src/install.c` and `src/uninstall.c`, and the
+[example package](https://github.com/KindleModding/example_kpm_package).
+Kobalt's data therefore cannot live in the package folder. The package
+follows the pattern of the official KOReader package and installs the app
+in `/mnt/us/kobalt`, which is where the ZIP puts it.
+
+`package.cmake` writes the archive with `cmake -E tar` rather than
+`kpm-helper.py`, so the build gains no Python step. The result matches the
+helper's output: a gzip tar with `manifest.json` first. The manifest has
+`manifest_version` 2, ID `kobalt`, and `supported_platforms` set to
+`kindlehf`. KPM versions are three integers, so `v1.0-beta.6` becomes
+`[1, 0, 0]`; the description carries the full version. The hooks are in
+`platforms/kindle/kpm/`:
+
+- `install.sh` moves each app file from the package folder into
+  `/mnt/us/kobalt` by renaming it, so no second copy is written. It never
+  writes `data/` (settings and reading progress) or `logs/`. It records the
+  installed files in `/mnt/us/kobalt/kpm-installed.txt` and removes files
+  that only an earlier package installed. It copies the `Kobalt.sh`
+  scriptlet to `documents/`.
+- `uninstall.sh upgrade`, which KPM runs before an upgrade, keeps the app.
+  A full uninstall removes only the recorded files, the directories they
+  leave empty and an unchanged scriptlet. `data/`, `logs/` and any other
+  file stay.
+- `launch.sh` runs `sh /mnt/us/kobalt/launcher/launch.sh "$@"`, which is the
+  same command as the KUAL entry.
+- Both hooks refuse to run while `/var/tmp/kobalt-kindle-prototype` exists,
+  because Kobalt is running or its supervisor failed.
+
+The scriptlet runs `/var/local/kmc/bin/kpm launch kobalt`, as
+KindleModding recommends. It omits `# DontUseFBInk`, so launcher refusals,
+such as an enabled passcode, appear on screen.
 
 The fixture is Amazon's `update_kindle_colorsoft_5.20.1.bin`, at 495503556
 bytes with SHA-256
@@ -143,27 +194,89 @@ unchanged. The preflight test covers both cases.
 
 ## Install and launch
 
-The device must be jailbroken with KUAL (or KUALA) installed. The launcher
-also refuses to run while the Kindle passcode is enabled.
+The launcher refuses to run while the Kindle passcode is enabled. Before
+starting Kobalt, exit KOReader or any other reader that has stopped the stock
+UI. Kobalt refuses a volume daemon that another reader has already paused.
 
-1. Exit KOReader or any other reader that has stopped the stock UI. Kobalt
-   refuses a volume daemon that another reader has already paused.
-2. Connect the Kindle over USB. Extract
+### With KPM (Véra jailbreak)
+
+The Véra jailbreak installs the KindleModding hotfix and KPM, but no KUAL.
+On a Mac, the Colorsoft's USB storage is reached over MTP, for example with
+[OpenMTP](https://openmtp.ganeshrvel.com/). The top level of its storage is
+`/mnt/us` on the device.
+
+1. Connect the Colorsoft to the Mac and open OpenMTP. Copy
+   `Kobalt-kindle-colorsoft-prototype.kpkg` to the top level of the Kindle
+   storage, beside `documents/`. Copy DRM-free EPUB files to `documents/`.
+   The default library scans that folder recursively.
+2. Eject the Kindle in OpenMTP and unplug it. On the Home screen, tap the
+   search bar and enter:
+
+   ```text
+   ;kpm install file:///mnt/us/Kobalt-kindle-colorsoft-prototype.kpkg
+   ```
+
+   KPM shows its log on screen. The install hook ends with
+   `Kobalt installed. Open "Kobalt" in the Library to start it.`
+3. Open **Kobalt** in the Library. It is the `documents/Kobalt.sh`
+   scriptlet, and it runs `kpm launch kobalt`.
+4. To leave, close any open book with the Library arrow. Then choose **Exit
+   Kobalt** from the Library's three-dot menu. The stock interface restarts.
+5. The installed package file is no longer needed. Delete
+   `Kobalt-kindle-colorsoft-prototype.kpkg` with OpenMTP if you want the
+   space back.
+
+To update, copy the new `.kpkg` the same way, then enter
+`;kpm uninstall kobalt` followed by the install command above. The KPM
+version tested refuses a local package over an installed `kobalt` package,
+even a newer one. Uninstalling first is safe, because uninstall keeps
+`kobalt/data/` (settings and reading progress) and `kobalt/logs/`.
+
+To use a library folder other than `documents/`, add a scriptlet of your own,
+such as `documents/Kobalt Books.sh`:
+
+```sh
+#!/bin/sh
+# Name: Kobalt (Books)
+/var/local/kmc/bin/kpm launch kobalt --library /mnt/us/Books
+```
+
+Do not edit `documents/Kobalt.sh`. Installs replace it, and uninstall
+keeps it only when it was changed.
+
+`;kpm uninstall kobalt` removes the app files the package installed and the
+unchanged scriptlet. It keeps `kobalt/data/`, `kobalt/logs/` and any other
+file in `kobalt/`. Delete that folder with OpenMTP to remove everything.
+
+If the search bar does not accept the command, run the same steps over SSH:
+`/var/local/kmc/bin/kpm -y install file:///mnt/us/Kobalt-kindle-colorsoft-prototype.kpkg`.
+A one-line scriptlet that runs that command from `documents/` also works.
+
+### With KUAL
+
+The device must be jailbroken with KUAL (or KUALA) installed.
+
+1. Connect the Kindle over USB. Extract
    `Kobalt-kindle-colorsoft-prototype.zip` at the Kindle USB root. This
    creates or updates `kobalt/` and `extensions/kobalt/`. When updating,
    keep the existing `kobalt/data/`, which holds settings and reading
    progress.
-3. Copy DRM-free EPUB files to `documents/`. The default library scans that
+2. Copy DRM-free EPUB files to `documents/`. The default library scans that
    folder recursively. To use another folder, edit
    `extensions/kobalt/menu.json` so the action reads
    `sh /mnt/us/kobalt/launcher/launch.sh --library /mnt/us/FOLDER`.
-4. Eject the Kindle. Open KUAL, then choose **Kobalt prototype → Start
+3. Eject the Kindle. Open KUAL, then choose **Kobalt prototype → Start
    Kobalt prototype**.
-5. To leave, close any open book with the Library arrow. Then choose **Exit
+4. To leave, close any open book with the Library arrow. Then choose **Exit
    Kobalt** from the Library's three-dot menu. The stock interface restarts.
 
 Over SSH, the same steps are: copy the ZIP to `/mnt/us/`, then run
 `unzip -o /mnt/us/Kobalt-kindle-colorsoft-prototype.zip -d /mnt/us/`.
+Use one install method at a time. KPM uninstall removes only the files its
+own install recorded.
+
+### Diagnostics
+
 Run `LD_LIBRARY_PATH=/mnt/us/kobalt/lib /mnt/us/kobalt/bin/kobalt-device-info`
 for a read-only diagnostic that does not stop the stock UI or open the
 framebuffer. Launcher logs are written to `/mnt/us/kobalt/logs/launcher.log`.
@@ -181,24 +294,36 @@ Kobalt installs no boot-time launcher.
 inversion, GCC16 full updates, GL16 partial updates, swipe waveform
 selection and rejection of grayscale snapshots for a 32-bit framebuffer.
 `touch_state_test`, `refresh_queue_test`, the runtime preflight and the
-mocked supervisor checks are unchanged in scope.
+mocked supervisor checks are unchanged in scope. `kpm/hooks-test.sh`
+(`kindle.kpm-hooks` in the native CTest set) runs the KPM hooks the way KPM
+does. It covers a fresh install over a ZIP install, an upgrade that retires a
+library, refusal while Kobalt runs, an uninstall that keeps data, logs,
+unrelated files and a changed scriptlet, and a clean reinstall and uninstall.
+For the Colorsoft, `verify-package.sh` also checks the `.kpkg`: manifest first,
+ID and platform, hooks identical to the sources, app files identical to the
+ZIP's. It then runs the hook test.
 
 ### Local result, 2026-11-06
 
 This run used an Apple Silicon Mac with Docker Desktop. The SDK image was
-built from the unpushed kobuild `kindle` target described above. The amd64
+built from the kobuild `kindle` target described above. The amd64
 SDK ran under emulation, and the verification container ran natively on
 ARM64. Both of the image's offline SDK checks passed: compile/link, hard-float
 ABI, interpreter, dependency closure and GLIBC ≤ 2.20.
 
-`bash platforms/kindle/build.sh colorsoft` produced
-`build/kindle-colorsoft/Kobalt-kindle-colorsoft-prototype.zip`: 54111620
-bytes, SHA-256
-`1022cda51f973c75ee02e32aa7a93f2e123b0614d38b44a384e0d56bd7617637`.
+`bash platforms/kindle/build.sh colorsoft` at commit `f531843` produced
+both packages:
+
+| Package | Bytes | SHA-256 |
+| --- | --- | --- |
+| `Kobalt-kindle-colorsoft-prototype.kpkg` | 54022483 | `6ee660bbdaaff5acee7045e1ff661b787a13a45544a9889f09c5f5b5b136966e` |
+| `Kobalt-kindle-colorsoft-prototype.zip` | 54111612 | `ef0426f3e279dd2587d2e9ab421431ed8ab3a7dea2600807de3c59aa78011b0f` |
+
 `bash platforms/kindle/sdk/prepare-runtime.sh colorsoft` prepared and then
 re-verified the 5.20.1 fixture.
 
-`bash platforms/kindle/verify-package.sh colorsoft` passed the ARM ELF audit:
+`bash platforms/kindle/verify-package.sh colorsoft` passed the KPM package
+checks and the ARM ELF audit:
 hard-float ABI, `/lib/ld-linux-armhf.so.3`, dependency closure and GLIBC ≤ 2.20.
 The power-helper checks passed. The Type Tester smoke also passed with
 `KOBALT_STRICT_MAIN_THREAD=1` against the stock glibc 2.35 userspace. It
@@ -213,6 +338,35 @@ the runtime preflight and the mocked supervisor checks. On that Qt,
 `refresh_queue_test` needs `-Werror` removed because of a sign-compare
 warning in Qt 6.4's own `qlist.h`. The full `kindle-native` CTest preset
 was not run because this Mac has no prepared native Qt 6.11 SDK or CMake.
+
+The KPM hook test passed under macOS `sh`, BusyBox 1.36 and the stock
+Colorsoft 5.20.1 BusyBox. The stock binary, `/bin/busybox.nosuid`, was
+extracted from the fixture firmware and run under ARM emulation; every applet
+the hooks use is present in that firmware's `/bin`.
+
+The real KPM CLI was built from `KindleModding/KPM` commit `4800e09` for
+`kindlehf`, with the stock package and database paths, and run in an ARM64
+Debian container:
+
+- `kpm -y install file:///mnt/us/Kobalt-kindle-colorsoft-prototype.kpkg`
+  moved the app into `/mnt/us/kobalt`, kept the existing `data/` and
+  `logs/`, and installed `documents/Kobalt.sh`. No app copy remained in the
+  package folder.
+- `kpm launch kobalt` reached Kobalt's launcher. Its preflight then refused
+  the container because it has no hard-float loader, as expected.
+- `kpm -y uninstall kobalt` removed the app files and the scriptlet, and kept
+  `data/` and `logs/`.
+- Installing a local package over the installed one failed inside KPM with
+  "Could not resolve dependency graph". This happened with the same and a
+  newer version, and with and without the online index. Uninstalling and
+  then installing worked and kept `data/`. The update steps above therefore
+  uninstall first.
+
+Building that CLI outside KMC's toolchain needed the system `sqlite3.h`,
+because the CLI includes it without the subproject's include path. Not
+established: that Véra's search bar passes the `file://` argument through
+unchanged, which KPM version Véra installs, and scriptlet launch on the
+device.
 
 PW5 still builds and passes `verify-package.sh` against its 5.19.2 fixture.
 The PW5 and PW3 fixtures re-prepared and verified with their unchanged pinned
