@@ -1,4 +1,5 @@
 #include "window.h"
+#include "folder_picker_checks.h"
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
 #include "interfaces/reader/ui/style/fonts.h"
@@ -180,9 +181,16 @@ int main(int argc, char **argv) {
             return 2;
         }
     }
-    kindle::Window window(paths,
-                          engineFontInputs(assets, {}, profile + "/fonts"),
-                          placeholderFontFamily(assets, copies), parser.value("library"));
+    const auto folderCheckRoot = profile + QStringLiteral("/folder-picker-fixture");
+    if (smoke
+        && !kindle::prepareFolderPickerChecks(folderCheckRoot,
+                                              QFileInfo(parser.value("book")).absoluteFilePath())) {
+        qCritical("Cannot prepare folder picker smoke fixture");
+        return 2;
+    }
+    kindle::Window window(paths, engineFontInputs(assets, {}, profile + "/fonts"),
+                          placeholderFontFamily(assets, copies), parser.value("library"),
+                          smoke ? folderCheckRoot : QStringLiteral("/mnt/us"));
     TerminationHandler termination;
     if (!termination.install(window)) {
         qCritical() << "Cannot install graceful termination handler";
@@ -215,7 +223,8 @@ int main(int argc, char **argv) {
     if (QGuiApplication::platformName() == QStringLiteral("kindle"))
         window.startDeviceLifecycle();
 #endif
-    const auto book = QFileInfo(parser.value("book")).absoluteFilePath();
+    const auto book = smoke ? folderCheckRoot + QStringLiteral("/SINGLE.EPUB")
+                            : QFileInfo(parser.value("book")).absoluteFilePath();
 #ifdef KOBALT_KINDLE_NATIVE_TESTING
     if (captures)
         kindle::captureScreens(window, book, QFileInfo(parser.value("screenshots")).absoluteFilePath());
@@ -365,7 +374,22 @@ int main(int argc, char **argv) {
         QTimer::singleShot(60000, &window, [fail] { fail(QStringLiteral("60 second timeout")); });
     }
     if (parser.isSet("book") && !captures)
-        QTimer::singleShot(0, &window, [&window, book] { window.openBook(book); });
+        QTimer::singleShot(0, &window, [&window, book, smoke, folderCheckRoot] {
+            if (smoke
+                && !kindle::checkFolderPicker(
+                        window, folderCheckRoot,
+                        qEnvironmentVariable("KOBALT_KINDLE_CHECK_CAPTURE_DIR"))) {
+                QCoreApplication::exit(1);
+                return;
+            }
+            if (smoke) {
+                if (!kindle::openBookFromPicker(
+                            window, folderCheckRoot,
+                            qEnvironmentVariable("KOBALT_KINDLE_CHECK_CAPTURE_DIR")))
+                    QCoreApplication::exit(1);
+            } else
+                window.openBook(book);
+        });
     const int result = app.exec();
     const int exitCode = result != 0 ? result : (window.deviceFailed() ? 1 : 0);
     return exitCode;

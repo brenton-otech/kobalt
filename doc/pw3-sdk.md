@@ -288,3 +288,90 @@ into Kobalt. The device's KUAL action now passes
 `--library /mnt/us/kobalt/books`; the original menu is retained alongside it
 as `menu.json.before-library`. This is device configuration, with no package
 or application rebuild. Kobalt was left stopped.
+
+### Add folder
+
+The Kindle Add folder action now opens a shared library-styled folder browser
+instead of the fixed-folder notice. It starts at `/mnt/us`, supports paged
+navigation and parent folders, and selects an empty folder as well as one
+with subfolders. Choosing **Use this folder** validates the location again,
+adds its canonical path through the existing library store, and scans EPUBs
+recursively. Books are referenced in place; the earlier copied library can
+remain separate from the original KOReader library.
+
+Directory reads run on a dedicated worker. Superseded results cannot replace
+the current location, and results do not reopen a dismissed picker. The
+browser stays inside the canonical user-storage root, hides dot folders and
+KOReader `.sdr` sidecars, and does not list symbolic links. No saved-data
+format changes or external database access are involved.
+
+The existing isolated Kindle smoke lane now checks the actual picker,
+storage boundary, stale responses, navigation, paging, cancellation and a
+recursive scan of the checked-in Type Tester fixture. Shared native UI
+coverage lives in `libraryLocalFolderPicker`; the full library gallery adds
+normal, nested, empty and unavailable-folder scenes for each existing variant.
+
+The PW3 build and package ELF/dependency audit passed. The strict stock-runtime
+smoke passed both the folder-picker checks and the existing reader checkpoint
+and reopen checks. The first run caught a parent-navigation regression: its
+loading callback cleared a borrowed path before the worker request was queued.
+The browser now owns its request path, and the corrected end-to-end check
+passes. Focused 300 PPI images under
+`build/kindle-pw3/folder-picker-captures/` were inspected at both screen sizes
+in light, dark and 150% text variants, comparing typography, row geometry and
+actions with Library folders.
+
+The native shared UI tests and full native gallery were not run because this
+Windows/WSL host has no prepared native Qt SDK. Their checks and scene
+registrations are included; the ARM captures do not replace the full gallery
+or establish physical touch compatibility for this new feature. The prepared
+SDK, Kobo and Android builds were reused or left outside this focused change.
+
+The new installer ZIP SHA-256 is
+`815cc9c57bfa97b64a34c7213fdab6df570cb60e1b3fc600e02b74427a85d051`.
+The new reader binary and installer ZIP were staged and checksum-verified on
+the device, then replaced with Kobalt stopped. The unchanged runtime asset
+manifest was checked as well. The previous installer is retained as
+`/mnt/us/Kobalt-kindle-pw3-prototype.before-add-folder.zip` for rollback.
+The active KOReader session, saved data, books and custom KUAL library option
+were preserved. Kobalt was left stopped. The user subsequently confirmed that
+the folder picker works well on the physical device.
+
+### Open a single book
+
+The Kindle's **Open a single book** action now uses the existing picker in
+file-selection mode. It lists subfolders and EPUBs, accepts case-insensitive
+`.epub` extensions, and opens a tapped EPUB through the standalone reader's
+existing validation, catalogue and saved-position path. It retains the original
+file in place and does not add the surrounding folder to the library.
+
+Directory reads and selection checks stay on the picker worker. The file must
+still be readable, a regular EPUB-named file, and inside canonical user storage
+when selected; hidden files and symbolic links are not listed. EPUB contents
+are validated by the reader's existing opening path, which reports unsupported,
+protected or damaged books through the existing error UI.
+
+The isolated smoke now selects an unindexed copy of the checked-in Type Tester
+fixture through the real file picker before checking page turns, checkpoint,
+reopening and close. Its native migration fixture uses that same copied-book
+identity, retaining the optional-field preservation assertion. Focused checks
+also cover filtering, storage boundaries, cancellation and switching between
+folder and book modes. The shared UI regression is `librarySingleBookPicker`;
+the full gallery includes the entry point, populated file picker and empty
+state for each existing variant.
+
+The updated PW3 build, ELF/dependency audit and strict stock-runtime smoke
+passed. That smoke opened its EPUB by tapping the actual file-picker row and
+verified saved position and rendered pixels after reopening. Directory picker
+regressions also passed. Focused captures were inspected in both sizes, light,
+dark and 150% text, comparing the menu entry and opened view directly with the
+existing Add folder controls. The native UI suite, native migration check and
+full native gallery remain unrun on this host without a prepared native Qt SDK.
+No SDK, Kobo or Android rebuild was needed for this Kindle feature.
+
+The single-book installer ZIP SHA-256 is
+`74bae6547ac5dc20aabdc3db69a09e33d6185afd75f3e82b9699139a45db72a2`.
+The validated installer is uploaded as
+`/mnt/us/Kobalt-kindle-pw3-single-book.zip`, with its checksum verified. The
+installed reader binary is unchanged: the user is still using Kobalt, so
+installation is pending a normal exit from that session.

@@ -131,7 +131,8 @@ helper's output: a gzip tar with `manifest.json` first. The manifest has
 - Both hooks refuse to run while `/var/tmp/kobalt-kindle-prototype` exists,
   because Kobalt is running or its supervisor failed.
 
-The scriptlet runs `/var/local/kmc/bin/kpm launch kobalt`, as
+The scriptlet embeds a Kobalt PNG as its Kindle Library icon. Its appearance
+requires on-device validation. The scriptlet runs `/var/local/kmc/bin/kpm launch kobalt`, as
 KindleModding recommends. It omits `# DontUseFBInk`, so launcher refusals,
 such as an enabled passcode, appear on screen.
 
@@ -232,17 +233,9 @@ version tested refuses a local package over an installed `kobalt` package,
 even a newer one. Uninstalling first is safe, because uninstall keeps
 `kobalt/data/` (settings and reading progress) and `kobalt/logs/`.
 
-To use a library folder other than `documents/`, add a scriptlet of your own,
-such as `documents/Kobalt Books.sh`:
-
-```sh
-#!/bin/sh
-# Name: Kobalt (Books)
-/var/local/kmc/bin/kpm launch kobalt --library /mnt/us/Books
-```
-
-Do not edit `documents/Kobalt.sh`. Installs replace it, and uninstall
-keeps it only when it was changed.
+To add another folder, open Kobalt's Library menu and select **Add folder**. Browse from Kindle storage, open the desired folder, and
+choose **Use this folder**. Kobalt scans EPUBs recursively without moving them.
+The Library menu also offers **Open a single book**.
 
 `;kpm uninstall kobalt` removes the app files the package installed and the
 unchanged scriptlet. It keeps `kobalt/data/`, `kobalt/logs/` and any other
@@ -262,9 +255,7 @@ The device must be jailbroken with KUAL (or KUALA) installed.
    keep the existing `kobalt/data/`, which holds settings and reading
    progress.
 2. Copy DRM-free EPUB files to `documents/`. The default library scans that
-   folder recursively. To use another folder, edit
-   `extensions/kobalt/menu.json` so the action reads
-   `sh /mnt/us/kobalt/launcher/launch.sh --library /mnt/us/FOLDER`.
+   folder recursively. Add other folders from the Library folders screen.
 3. Eject the Kindle. Open KUAL, then choose **Kobalt prototype → Start
    Kobalt prototype**.
 4. To leave, close any open book with the Library arrow. Then choose **Exit

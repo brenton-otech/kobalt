@@ -13,10 +13,12 @@ class WidgetCanvas;
 }
 namespace kobalt::kindle {
 class Device;
+class FolderBrowser;
 class Window final : public QWidget {
     Q_OBJECT
 public:
-    Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder, QString libraryRoot);
+    Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder, QString libraryRoot,
+           QString folderStorageRoot = QStringLiteral("/mnt/us"));
     ~Window() override;
     void openBook(const QString &path);
     void closeBook();
@@ -48,6 +50,7 @@ private:
     QString openedKey, libraryRoot, pendingOpen;
     QStackedWidget *stack;
     android::StartScreen *start;
+    FolderBrowser *folderBrowser;
     android::WidgetCanvas *canvas;
     QLabel *sleepView, *retirementView;
     QTimer standby;

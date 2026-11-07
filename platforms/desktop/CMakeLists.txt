@@ -459,6 +459,8 @@ if(BUILD_TESTING)
             connectedModalFooter
             libraryActionButtons
             libraryFolderPicker
+            libraryLocalFolderPicker
+            librarySingleBookPicker
             libraryScanCaption
             libraryCanvasFollowsViewport
             booxAppCanvases
