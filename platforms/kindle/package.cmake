@@ -88,3 +88,32 @@ endif()
 execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cf "${BUILD}/${package}" --format=zip kobalt extensions
     WORKING_DIRECTORY "${stage}" COMMAND_ERROR_IS_FATAL ANY)
 message(STATUS "Kindle ${target} prototype: ${BUILD}/${package}")
+# The Colorsoft's current jailbreak installs apps with KPM, not KUAL. A KPM
+# package is a gzip tar with manifest.json and optional sh hooks at its root;
+# the hooks share the staged app rather than copying it again.
+if(target STREQUAL colorsoft)
+    file(READ "${app}/assets/manifest.json" assets)
+    string(JSON kobalt_version GET "${assets}" version)
+    # KPM versions are three integers; a prerelease suffix has no field.
+    if(NOT kobalt_version MATCHES "^v?([0-9]+)\\.([0-9]+)(\\.([0-9]+))?")
+        message(FATAL_ERROR "Cannot derive a KPM version from ${kobalt_version}")
+    endif()
+    set(version_major "${CMAKE_MATCH_1}")
+    set(version_minor "${CMAKE_MATCH_2}")
+    set(version_patch "${CMAKE_MATCH_4}")
+    if(version_patch STREQUAL "")
+        set(version_patch 0)
+    endif()
+    set(description "Kobalt ${kobalt_version} prototype for the Kindle Colorsoft: a DRM-free EPUB reader")
+    configure_file("${CMAKE_CURRENT_LIST_DIR}/kpm/manifest.json.in" "${stage}/manifest.json" @ONLY)
+    foreach(name install.sh uninstall.sh launch.sh)
+        configure_file("${CMAKE_CURRENT_LIST_DIR}/kpm/${name}" "${stage}/${name}" COPYONLY)
+    endforeach()
+    configure_file("${CMAKE_CURRENT_LIST_DIR}/kpm/Kobalt.sh" "${stage}/scriptlets/Kobalt.sh" COPYONLY)
+    set(kpm_package "Kobalt-kindle-${target}-prototype.kpkg")
+    # manifest.json comes first so KPM finds it without reading the whole archive.
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E tar czf "${BUILD}/${kpm_package}"
+        manifest.json install.sh uninstall.sh launch.sh scriptlets kobalt
+        WORKING_DIRECTORY "${stage}" COMMAND_ERROR_IS_FATAL ANY)
+    message(STATUS "Kindle ${target} KPM package: ${BUILD}/${kpm_package}")
+endif()

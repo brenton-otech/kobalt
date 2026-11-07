@@ -157,6 +157,8 @@ else()
             "${CMAKE_BINARY_DIR}/test-tmp")
         add_test(NAME kindle.runtime-preflight COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/launcher/runtime-test.sh"
             "${CMAKE_BINARY_DIR}/test-tmp")
+        add_test(NAME kindle.kpm-hooks COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/kpm/hooks-test.sh"
+            "${CMAKE_BINARY_DIR}/test-tmp")
         add_test(NAME kindle.standalone COMMAND "${CMAKE_COMMAND}"
             "-DAPP=$<TARGET_FILE:kobalt_kindle>" "-DROOT=${KOBALT_ROOT}" "-DBUILD=${CMAKE_BINARY_DIR}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/run-smoke.cmake")

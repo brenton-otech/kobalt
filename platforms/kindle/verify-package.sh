@@ -76,6 +76,21 @@ readelf=/usr/bin/readelf
 (cd "$sysroot" && sha256sum --check --status files.sha256) || fail 'stock runtime checksum mismatch'
 [[ $(cat "$app/launcher/runtime-target") == "$target" ]] || fail 'packaged runtime target mismatch'
 sh "$app/launcher/check-runtime.sh" "$app" "$sysroot" || fail 'runtime preflight rejected the stock fixture'
+if [[ "$target" == colorsoft ]]; then
+    kpkg=$build/Kobalt-kindle-colorsoft-prototype.kpkg
+    [[ -f "$kpkg" ]] || fail 'Colorsoft KPM package missing'
+    [[ $(tar -tzf "$kpkg" | head -n 1) == manifest.json ]] || fail 'KPM manifest is not the first entry'
+    tar -xzOf "$kpkg" manifest.json | tr -d ' \n' | grep -q '"id":"kobalt".*"supported_platforms":\["kindlehf"\]' \
+        || fail 'KPM manifest id or platform mismatch'
+    for hook in install.sh uninstall.sh launch.sh scriptlets/Kobalt.sh; do
+        tar -xzOf "$kpkg" "$hook" | cmp -s - "/work/platforms/kindle/kpm/${hook#scriptlets/}" \
+            || fail "KPM package has a stale $hook"
+    done
+    diff <(tar -tzf "$kpkg" | grep -v '/$' | grep '^kobalt/' | sort) \
+        <(cd "$build/package" && find kobalt -type f | sort) >/dev/null \
+        || fail 'KPM package app files differ from the ZIP package'
+    sh /work/platforms/kindle/kpm/hooks-test.sh "$build/test-tmp" || fail 'KPM hook checks failed'
+fi
 for binary in "$app/bin/kobalt" "$app/plugins/platforms/libqkindle.so"; do
     "$readelf" --file-header "$binary" >/dev/null || fail "missing or invalid ELF: $binary"
 done
