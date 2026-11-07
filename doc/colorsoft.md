@@ -369,6 +369,10 @@ unchanged, which KPM version Véra installs, and scriptlet launch on the
 device.
 
 PW5 still builds and passes `verify-package.sh` against its 5.19.2 fixture.
+At commit `d21d3da`, PW3 also built from a freshly prepared
+`localhost/kobuild:kindle-pw3` image, whose own SDK checks passed. It produced
+only its ZIP, with no KPM package, and passed `verify-package.sh pw3`: the
+softfp ELF audit, the power-helper checks and the stock 5.13.5 reading smoke.
 The PW5 and PW3 fixtures re-prepared and verified with their unchanged pinned
 release strings and loader and libc digests after the fixture metadata moved
 into `target.sh`.
