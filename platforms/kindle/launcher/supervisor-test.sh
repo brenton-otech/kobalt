@@ -11,7 +11,8 @@ sleep 120 &
 KINDLE_TEST_VOLUME_PID=$!
 export KINDLE_TEST_VOLUME_PID
 trap 'kill -CONT "$KINDLE_TEST_VOLUME_PID" 2>/dev/null || :; kill -TERM "$KINDLE_TEST_VOLUME_PID" 2>/dev/null || :; wait "$KINDLE_TEST_VOLUME_PID" 2>/dev/null || :; rm -rf "$TEST_DIR"' EXIT HUP INT TERM
-mkdir -p "$TEST_DIR/tools" "$TEST_DIR/app/bin" "$TEST_DIR/app/logs"
+mkdir -p "$TEST_DIR/tools" "$TEST_DIR/app/bin" "$TEST_DIR/app/logs" "$TEST_DIR/app/launcher"
+echo colorsoft >"$TEST_DIR/app/launcher/runtime-target"
 export KINDLE_TEST_ROOT="$TEST_DIR"
 storage_check=$(dirname "$SUPERVISOR")/check-storage.sh
 printf 'root / ext4 rw 0 0\nfsp /mnt/us fuse.fsp rw,noexec 0 0\n' >"$TEST_DIR/mounts"
@@ -41,6 +42,10 @@ EOF
 cat >"$TEST_DIR/tools/start" <<'EOF'
 #!/bin/sh
 echo start >>"$KINDLE_TEST_ROOT/actions"
+if [ "${KINDLE_TEST_START_HANG:-0}" = 1 ]; then
+    echo "$$" >"$KINDLE_TEST_ROOT/hung-command.pid"
+    exec sleep 120
+fi
 case "${LD_LIBRARY_PATH:-}" in "$KINDLE_TEST_ROOT/app/lib"*)
     echo 'Stock recovery inherited application libraries.' >&2
     exit 97
@@ -51,7 +56,7 @@ cat >"$TEST_DIR/tools/usleep" <<'EOF'
 #!/bin/sh
 case "$1" in
 1250000) echo delay >>"$KINDLE_TEST_ROOT/delays" ;;
-100000) sleep 0.001 ;;
+100000|1000000) sleep 0.001 ;;
 *) exit 1 ;;
 esac
 EOF
@@ -72,6 +77,8 @@ chmod +x "$TEST_DIR/tools/status" "$TEST_DIR/tools/start" "$TEST_DIR/tools/stop"
 cat >"$TEST_DIR/tools/lipc-get-prop" <<'EOF'
 #!/bin/sh
 set -eu
+# Colorsoft's framework flag may stay zero until Home is activated.
+if [ "$4" = frameworkStarted ]; then echo 0; exit 0; fi
 [ "$4" = load ] || { echo 1; exit 0; }
 if [ -f "$KINDLE_TEST_ROOT/pending-module" ]; then
     [ "${KINDLE_TEST_SCREEN_QUERY_FAIL:-0}" = 0 ] || exit 1
@@ -93,6 +100,19 @@ chmod +x "$TEST_DIR/tools/lipc-get-prop"
 cat >"$TEST_DIR/tools/lipc-set-prop" <<'EOF'
 #!/bin/sh
 set -eu
+if [ "$1" = com.lab126.appmgrd ]; then
+    [ "$2" = start ] && [ "$3" = app://com.lab126.booklet.home ]
+    if [ -f "$KINDLE_TEST_ROOT/home-pending" ]; then
+        read -r remaining <"$KINDLE_TEST_ROOT/home-pending"
+        if [ "$remaining" -gt 0 ]; then
+            echo "$((remaining - 1))" >"$KINDLE_TEST_ROOT/home-pending"
+            exit 1
+        fi
+    fi
+    [ "${KINDLE_TEST_HOME_FAIL:-0}" = 0 ] || exit 1
+    echo home >>"$KINDLE_TEST_ROOT/home-actions"
+    exit 0
+fi
 printf '%s %s\n' "$4" "$5" >>"$KINDLE_TEST_ROOT/overlay-actions"
 case "$4" in
     unload)
@@ -102,6 +122,10 @@ case "$4" in
         printf '%s %s\n' "$5" "$delay" >"$KINDLE_TEST_ROOT/pending-module"
         ;;
     load)
+        if [ "${KINDLE_TEST_SCREEN_RESTORE_HANG:-0}" = 1 ]; then
+            echo "$$" >"$KINDLE_TEST_ROOT/hung-command.pid"
+            exec sleep 120
+        fi
         [ "${KINDLE_TEST_SCREEN_RESTORE_FAIL:-0}" = 0 ] || exit 1
         rm -f "$KINDLE_TEST_ROOT/pending-module"
         printf '%s\n' "$5" >>"$KINDLE_TEST_ROOT/modules"
@@ -119,10 +143,12 @@ run_case()
     : >"$TEST_DIR/actions"
     : >"$TEST_DIR/delays"
     : >"$TEST_DIR/overlay-actions"
+    : >"$TEST_DIR/home-actions"
+    echo "${KINDLE_TEST_HOME_DELAY:-0}" >"$TEST_DIR/home-pending"
     rm -f "$TEST_DIR/pending-module"
     printf '%s\n' "${KINDLE_TEST_MODULES-screensaver langpicker blankwindow}" >"$TEST_DIR/modules"
     result=0
-    sh "$TEST_DIR/run/supervisor.sh" "$TEST_DIR/app" "$TEST_DIR/run" || result=$?
+    sh "$TEST_DIR/run/supervisor.sh" "$TEST_DIR/app" "$TEST_DIR/run" >"$TEST_DIR/run/launcher.log" 2>&1 || result=$?
     kill -0 "$KINDLE_TEST_VOLUME_PID"
     case "$(ps -o stat= -p "$KINDLE_TEST_VOLUME_PID")" in *T*) echo 'Volume daemon was not resumed.' >&2; exit 1 ;; esac
 }
@@ -143,6 +169,31 @@ run_case
 [ "$result" = 0 ] && [ ! -e "$TEST_DIR/run" ]
 [ "$(cat "$TEST_DIR/delays")" = delay ]
 [ "$(cat "$TEST_DIR/actions")" = "$(printf 'stop\napp\nstart')" ]
+[ "$(cat "$TEST_DIR/home-actions")" = home ]
+# Home must activate even with frameworkStarted=0 and retry transient failures.
+export KINDLE_TEST_HOME_DELAY=3
+run_case
+[ "$result" = 0 ]
+[ ! -e "$TEST_DIR/run" ]
+[ "$(cat "$TEST_DIR/home-pending")" = 0 ]
+[ "$(cat "$TEST_DIR/home-actions")" = home ]
+unset KINDLE_TEST_HOME_DELAY
+for failure in KINDLE_TEST_HOME_FAIL; do
+    export "$failure=1"
+    : >"$TEST_DIR/app/logs/launcher.log"
+    run_case
+    [ "$result" = 0 ]
+    [ -f "$TEST_DIR/run/supervisor.sh" ]
+    [ ! -s "$TEST_DIR/home-actions" ]
+    grep -q 'Could not activate Kindle Home.' "$TEST_DIR/app/logs/launcher.log"
+    rm -rf "$TEST_DIR/run"
+    unset "$failure"
+done
+# Other Kindle targets keep their existing handoff.
+echo pw3 >"$TEST_DIR/app/launcher/runtime-target"
+run_case
+[ "$result" = 0 ] && [ ! -e "$TEST_DIR/run" ] && [ ! -s "$TEST_DIR/home-actions" ]
+echo colorsoft >"$TEST_DIR/app/launcher/runtime-target"
 # Both overlays must finish their asynchronous unload before app startup.
 export KINDLE_TEST_MODULES='splash screensaver langpicker blankwindow' KINDLE_TEST_SCREEN_UNLOAD_DELAY=2
 run_case
@@ -187,6 +238,23 @@ export KINDLE_TEST_MODULES=
 run_case
 [ "$result" = 23 ] && [ ! -e "$TEST_DIR/run" ]
 unset KINDLE_TEST_MODULES KINDLE_TEST_SCREEN_RESTORE_FAIL
+
+# Hung stock commands must be reaped, leave recovery evidence, and never
+# prevent trying GUI startup after a failed screensaver reload.
+for failure in KINDLE_TEST_SCREEN_RESTORE_HANG KINDLE_TEST_START_HANG; do
+    export "$failure=1"
+    : >"$TEST_DIR/app/logs/launcher.log"
+    run_case
+    [ "$result" = 23 ] && [ -f "$TEST_DIR/run/supervisor.sh" ]
+    [ "$(cat "$TEST_DIR/actions")" = "$(printf 'stop\napp\nstart')" ]
+    grep -q 'Stock command timed out:' "$TEST_DIR/app/logs/launcher.log"
+    grep -q 'Starting stock Kindle interface.' "$TEST_DIR/app/logs/launcher.log"
+    if kill -0 "$(cat "$TEST_DIR/hung-command.pid")" 2>/dev/null; then
+        echo 'Timed-out stock client was not reaped.' >&2; exit 1
+    fi
+    rm -rf "$TEST_DIR/run"
+    unset "$failure"
+done
 
 # Interrupt exactly after STOP, before its shell command returns. Recording
 # the cleanup obligation afterward would leave the mock daemon frozen.

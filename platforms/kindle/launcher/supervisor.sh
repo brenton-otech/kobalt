@@ -10,12 +10,36 @@ exit_status=1
 volume_held=no
 volume_pid=
 screensaver_loaded=no
+recovery_complete=no
 cd / || exit 1
+
+# Stock LIPC clients and Upstart requests can stall too. In particular, a
+# stuck screensaver reload must not prevent attempting to restore the GUI.
+# Run only short-lived stock clients here, never the reader or its saves.
+bounded_stock()
+(
+    trap - EXIT HUP INT TERM
+    command_ticks=$1
+    shift
+    "$@" &
+    command_pid=$!
+    while kill -0 "$command_pid" 2>/dev/null; do
+        if [ "$command_ticks" -le 0 ]; then
+            echo "Stock command timed out: $*" >&2
+            kill -KILL "$command_pid" 2>/dev/null || :
+            wait "$command_pid" 2>/dev/null || :
+            return 124
+        fi
+        usleep 100000 || :
+        command_ticks=$((command_ticks - 1))
+    done
+    wait "$command_pid"
+)
 
 has_module()
 {
     wanted_module=$1
-    modules=$(lipc-get-prop -s -q com.lab126.blanket load) || return 2
+    modules=$(bounded_stock 50 lipc-get-prop -s -q com.lab126.blanket load) || return 2
     for loaded_module in $modules; do
         [ "$loaded_module" != "$wanted_module" ] || return 0
     done
@@ -43,8 +67,30 @@ wait_for_module()
 restore_screensaver()
 {
     [ "$screensaver_loaded" = yes ] || return 0
-    lipc-set-prop -s -q com.lab126.blanket load screensaver || return 1
+    bounded_stock 50 lipc-set-prop -s -q com.lab126.blanket load screensaver || return 1
     wait_for_module screensaver yes
+}
+
+restore_home()
+{
+    # Colorsoft can restart all GUI services without activating an application,
+    # leaving our exit frame on the panel. Service startup alone is not handoff.
+    [ "$(cat "$APP_DIR/launcher/runtime-target" 2>/dev/null)" = colorsoft ] || return 0
+    echo 'Opening stock Kindle Home.' >&2
+    home_attempts=0
+    while [ "$home_attempts" -lt 60 ]; do
+        # Do not wait for frameworkStarted: Colorsoft can leave it zero until
+        # an app is activated. Let appmgrd queue Home while the UI starts;
+        # retry transient service failures without blocking recovery forever.
+        if bounded_stock 10 lipc-set-prop com.lab126.appmgrd start app://com.lab126.booklet.home; then
+            echo 'Stock Kindle Home activation request completed.' >&2
+            return 0
+        fi
+        usleep 1000000 || return 1
+        home_attempts=$((home_attempts + 1))
+    done
+    echo 'Kindle Home activation requests did not succeed.' >&2
+    return 1
 }
 
 release_overlays()
@@ -104,9 +150,10 @@ restore_waveform_mounts()
     done
 }
 
-cleanup()
+recover()
 {
     trap '' HUP INT TERM
+    echo "Kobalt recovery started (app status $exit_status)." >&2
     if [ -n "$child" ]; then
         kill -TERM "$child" 2>/dev/null || :
         attempts=0
@@ -122,9 +169,6 @@ cleanup()
     fi
     stop_bridge || echo 'Could not inspect the power bridge PID.' >&2
     restore_waveform_mounts
-    if [ -f "$RUN_DIR/launcher.log" ]; then
-        cat "$RUN_DIR/launcher.log" >>"$APP_DIR/logs/launcher.log" 2>/dev/null || :
-    fi
     if [ "$volume_held" = yes ]; then
         if kill -CONT "$volume_pid" 2>/dev/null; then
             volume_held=no
@@ -134,21 +178,39 @@ cleanup()
     fi
     if [ "$framework_stopped" = yes ]; then
         screen_restored=yes
+        echo 'Restoring stock screensaver.' >&2
         if ! restore_screensaver; then
             screen_restored=no
             echo 'Could not reload stock screensaver. Recovery files remain.' >&2
         fi
-        if start lab126_gui; then
+        echo 'Starting stock Kindle interface.' >&2
+        if bounded_stock 150 start lab126_gui; then
             framework_stopped=no
+            echo 'Stock Kindle interface start request completed.' >&2
         else
             echo "Could not restart lab126_gui. Run 'start lab126_gui' from SSH." >&2
             # Retain the lock and this recovery script after a restoration failure.
+            return
+        fi
+        if ! restore_home; then
+            echo 'Could not activate Kindle Home. Recovery files remain.' >&2
             return
         fi
         [ "$screen_restored" = yes ] || return
     fi
     [ "$volume_held" = no ] || return
     [ "$waveform_restored" = yes ] || return
+    recovery_complete=yes
+}
+cleanup()
+{
+    recover
+    # Include recovery failures before removing the system-storage log. Keep
+    # the full recovery directory when any restoration step failed.
+    if [ -f "$RUN_DIR/launcher.log" ]; then
+        cat "$RUN_DIR/launcher.log" >>"$APP_DIR/logs/launcher.log" 2>/dev/null || :
+    fi
+    [ "$recovery_complete" = yes ] || return
     rm -f "$RUN_DIR/supervisor.sh" "$RUN_DIR/pid" "$RUN_DIR/bridge.pid" "$RUN_DIR/power-bridge" "$RUN_DIR/volume.pid" "$RUN_DIR/launcher.log" "$RUN_DIR/screensaver.loaded"
     rmdir "$RUN_DIR" || :
 }
@@ -233,5 +295,6 @@ KOBALT_KINDLE_POWER_BRIDGE="$RUN_DIR/power-bridge" \
 child=$!
 wait "$child"
 exit_status=$?
+echo "Kobalt process exited (status $exit_status)." >&2
 child=
 exit "$exit_status"
