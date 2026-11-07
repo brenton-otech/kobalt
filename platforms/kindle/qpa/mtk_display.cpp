@@ -97,11 +97,16 @@ bool copyPixels(unsigned char *destination, const Layout &layout, const QImage &
         for (int y = area.top(); y <= area.bottom(); ++y) {
             auto *out = reinterpret_cast<uint32_t *>(destination + size_t(y) * layout.stride) + area.left();
             const auto *in = reinterpret_cast<const uint32_t *>(pixels.constScanLine(y)) + area.left();
-            if (layout.inverted) {
-                for (int x = 0; x < area.width(); ++x)
-                    out[x] = in[x] ^ 0x00FFFFFF;
-            } else {
+            if (!layout.inverted && !layout.swapRedBlue) {
                 std::memcpy(out, in, size_t(area.width()) * 4);
+                continue;
+            }
+            for (int x = 0; x < area.width(); ++x) {
+                // Color night mode inverts the panel like 8-bit night mode.
+                uint32_t pixel = layout.inverted ? in[x] ^ 0x00FFFFFF : in[x];
+                if (layout.swapRedBlue)
+                    pixel = (pixel & 0xFF00FF00) | ((pixel >> 16) & 0xFF) | ((pixel & 0xFF) << 16);
+                out[x] = pixel;
             }
         }
         return true;
@@ -125,17 +130,20 @@ bool copyPixels(unsigned char *destination, const Layout &layout, const QImage &
 Update makeUpdate(const QRect &area, bool full, uint32_t marker, int direction, bool swipeAvailable, bool isColor) {
     Update update{};
     update.region = {uint32_t(area.y()), uint32_t(area.x()), uint32_t(area.width()), uint32_t(area.height())};
-    if (isColor) {
-        update.waveform = full ? 14 : 257; // 14 = MTK_WAVEFORM_MODE_GCC16 for full color; 257 = AUTO
-    } else {
-        update.waveform = full ? 2 : 257; // 2 = GC16; 257 = AUTO
-    }
+    // On color panels AUTO chooses only between DU and GC16, so antialiased
+    // text would flash as GC16 partial on every page. Request GL16 there, as
+    // KOReader does, and reserve the CFA waveform GCC16 for full refreshes.
+    if (isColor)
+        update.waveform = full ? waveformGcc16 : waveformGl16;
+    else
+        update.waveform = full ? waveformGc16 : waveformAuto;
     update.mode = full ? 1 : 0;
     update.marker = marker;
     update.temperature = 0x1000; // Ambient sensor.
     if (!full && swipeAvailable && (direction == -1 || direction == 1) &&
         area.width() >= 12 && area.height() >= 12) {
         update.flags = 0x10000;
+        update.waveform = waveformAuto; // The kernel selects the swipe waveforms.
         update.swipeDirection = direction > 0 ? 2 : 3; // Logical left/right; kernel rotates.
         update.swipeSteps = 12;
     }
@@ -181,8 +189,10 @@ bool Display::open() {
         error_ = QStringLiteral("Cannot inspect Kindle framebuffer: %1").arg(QString::fromLocal8Bit(std::strerror(errno)));
         return false;
     }
-    layout_ = {int(variable.xres), int(variable.yres), fixed.line_length, fixed.smem_len,
-               variable.bits_per_pixel == 32 ? 4 : 1, variable.grayscale == 2};
+    const bool color = variable.bits_per_pixel == 32;
+    layout_ = {int(variable.xres), int(variable.yres), fixed.line_length, fixed.smem_len, color ? 4 : 1,
+               color ? variable.grayscale == grayscaleColorNight : variable.grayscale == 2,
+               color && variable.red.offset == 0 && variable.blue.offset == 16};
     rotation_ = variable.rotate;
     if (std::strncmp(fixed.id, "hwtcon_v2", sizeof(fixed.id)) == 0) {
         controllerType_ = ControllerType::Mtk;
@@ -192,7 +202,14 @@ bool Display::open() {
         error_ = QStringLiteral("Unsupported framebuffer layout; expected hwtcon_v2 or mxc_epdc_fb");
         return false;
     }
-    const bool validColor = (variable.bits_per_pixel == 32 && fixed.type == FB_TYPE_PACKED_PIXELS);
+    // Accept either 8-bit channel order with green in the middle byte.
+    const bool knownChannels = variable.green.offset == 8 && variable.green.length == 8 &&
+        variable.red.length == 8 && variable.blue.length == 8 &&
+        ((variable.red.offset == 16 && variable.blue.offset == 0) ||
+         (variable.red.offset == 0 && variable.blue.offset == 16));
+    const bool validColor = color && controllerType_ == ControllerType::Mtk &&
+        fixed.type == FB_TYPE_PACKED_PIXELS && knownChannels &&
+        (variable.grayscale == grayscaleColor || variable.grayscale == grayscaleColorNight);
     const bool validGray = (variable.bits_per_pixel == 8 && (variable.grayscale == 1 || variable.grayscale == 2) &&
                             fixed.type == FB_TYPE_PACKED_PIXELS);
     if ((!validColor && !validGray) || variable.xoffset || variable.yoffset ||
@@ -223,7 +240,8 @@ bool Display::open() {
     }
     qInfo("kindle: native %s %dx%d (%s) stride=%zu rotation=%u inverted=%d swipe=%d",
           controllerType_ == ControllerType::Mtk ? "hwtcon_v2" : "mxc_epdc_fb",
-          layout_.width, layout_.height, layout_.bytesPerPixel == 4 ? "32-bit color" : "8-bit gray",
+          layout_.width, layout_.height,
+          layout_.bytesPerPixel == 4 ? (layout_.swapRedBlue ? "32-bit RGBX" : "32-bit BGRX") : "8-bit gray",
           layout_.stride, rotation_, layout_.inverted, swipeAvailable_);
     return true;
 #else

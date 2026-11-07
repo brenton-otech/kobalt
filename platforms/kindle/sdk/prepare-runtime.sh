@@ -7,7 +7,7 @@ if [[ "${1:-}" == --inside ]]; then
     [[ $# == 2 && "$root" == /work ]] || { echo 'Invalid inside invocation.' >&2; exit 2; }
     kindle_target "$2"
 else
-    [[ $# -le 1 ]] || { echo 'Usage: bash platforms/kindle/sdk/prepare-runtime.sh [pw5|pw3]' >&2; exit 2; }
+    [[ $# -le 1 ]] || { echo 'Usage: bash platforms/kindle/sdk/prepare-runtime.sh [pw5|pw3|colorsoft]' >&2; exit 2; }
     kindle_target "${1:-pw5}"
     export DOCKER_CONFIG=${DOCKER_CONFIG:-"$root/build/$fixture/docker-config"}
     mkdir -p "$DOCKER_CONFIG" "$root/build/$fixture"
@@ -40,25 +40,20 @@ fetch "$firmware" "https://s3.amazonaws.com/firmwaredownloads/$firmware" "$firmw
 
 verify_runtime() {
     local candidate=${1:-$runtime}
+    local loader=$candidate$interpreter
+    [[ -L "$loader" ]] && loader=$(dirname "$loader")/$(readlink "$loader")
     [[ -f "$candidate/firmware.sha256" && $(cat "$candidate/firmware.sha256") == "$firmware_sha" &&
-       -f "$candidate/files.sha256" && $(readlink "$candidate$interpreter") == ld-2.20.so ]] || return 1
-    readelf -h "$candidate/lib/libc-2.20.so" | grep -q "$abi ABI" || return 1
+       -f "$candidate/files.sha256" && "$loader" -ef "$candidate/$runtime_loader" ]] || return 1
+    readelf -h "$candidate/$runtime_libc" | grep -q "$abi ABI" || return 1
     (
         cd "$candidate"
-        if [[ "$target" == pw5 ]]; then
-            printf '%s  lib/ld-2.20.so\n%s  lib/libc-2.20.so\n' \
-            8b36a28d91b6fdb20849869b13befeb0cf1024001c1a4e439189bd73dddf8b4b \
-            8357e99917260277a1c137383a4edbdc5bcb4318464cb1f5a2096533aff3b2d9 | sha256sum --check --status || exit 1
-        else
-            printf '%s  lib/ld-2.20.so\n%s  lib/libc-2.20.so\n' \
-                117de64bdc41e8371b420dae74a821aa3d9e9d02dfcc3f27c76cb948073cece1 \
-                1338645be2267bff9061746d1a477cc6e036b272d230c199725e392d9300748d | sha256sum --check --status || exit 1
-        fi
+        printf '%s  %s\n%s  %s\n' "$loader_sha" "$runtime_loader" "$libc_sha" "$runtime_libc" |
+            sha256sum --check --status || exit 1
         sha256sum --check --status files.sha256
     )
 }
 if verify_runtime; then
-    echo "Verified cached $target runtime from $firmware (stock glibc 2.20)."
+    echo "Verified cached $target runtime from $firmware (stock glibc $runtime_glibc)."
     exit 0
 fi
 
@@ -88,11 +83,7 @@ gzip -dc "$scratch/unpacked/rootfs.img.gz" >"$scratch/rootfs.img"
 debugfs -R "rdump /lib $scratch/runtime" "$scratch/rootfs.img"
 debugfs -R "rdump /usr/lib $scratch/runtime/usr" "$scratch/rootfs.img"
 debugfs -R 'cat /etc/version.txt' "$scratch/rootfs.img" >"$scratch/runtime/version.txt"
-if [[ "$target" == pw5 ]]; then
-    grep -q '040-juno_1902_malbec_bellatrix-467076' "$scratch/runtime/version.txt"
-else
-    grep -q '030-juno_1305_muscat_wario-371675' "$scratch/runtime/version.txt"
-fi
+grep -Fq "$firmware_release" "$scratch/runtime/version.txt"
 printf '%s\n' "$firmware_sha" >"$scratch/runtime/firmware.sha256"
 (
     cd "$scratch/runtime"
@@ -102,4 +93,4 @@ verify_runtime "$scratch/runtime"
 rm -rf "$runtime"
 mv "$scratch/runtime" "$runtime"
 verify_runtime
-echo "Prepared $target runtime from $firmware (stock glibc 2.20)."
+echo "Prepared $target runtime from $firmware (stock glibc $runtime_glibc)."

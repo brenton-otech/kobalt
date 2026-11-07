@@ -49,7 +49,7 @@ if [[ "${1:-}" == --inside ]]; then
     [[ $# == 2 && "$root" == /work ]] || fail 'invalid inside invocation'
     kindle_target "$2"
 else
-    [[ $# -le 1 ]] || fail 'Usage: bash platforms/kindle/verify-package.sh [pw5|pw3|--self-test]'
+    [[ $# -le 1 ]] || fail 'Usage: bash platforms/kindle/verify-package.sh [pw5|pw3|colorsoft|--self-test]'
     kindle_target "${1:-pw5}"
 fi
 export DOCKER_CONFIG=${DOCKER_CONFIG:-"$root/build/$fixture/docker-config"}

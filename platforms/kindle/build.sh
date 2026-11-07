@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ $# -gt 1 ]]; then echo "Usage: bash platforms/kindle/build.sh [pw5|pw3]" >&2; exit 2; fi
+if [[ $# -gt 1 ]]; then echo "Usage: bash platforms/kindle/build.sh [pw5|pw3|colorsoft]" >&2; exit 2; fi
 root=$(cd "$(dirname "$0")/../.." && pwd)
 source "$root/platforms/kindle/target.sh"
 kindle_target "${1:-pw5}"

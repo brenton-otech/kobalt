@@ -56,7 +56,7 @@ constexpr unsigned long epdcSendUpdate = 0x4048462e;
 
 enum class ControllerType {
     Unknown,
-    Mtk,  // hwtcon_v2 (Paperwhite 5 / MediaTek)
+    Mtk,  // hwtcon_v2 (Paperwhite 5, Colorsoft / MediaTek)
     Epdc  // mxc_epdc_fb (Paperwhite 3 / NXP i.MX6)
 };
 
@@ -65,7 +65,15 @@ struct Layout {
     size_t stride = 0, bytes = 0;
     int bytesPerPixel = 1;
     bool inverted = false;
+    // 32-bit only: the framebuffer stores red in the low byte (R, G, B, X),
+    // the reverse of QImage::Format_RGB32 on little-endian ARM (B, G, R, X).
+    bool swapRedBlue = false;
 };
+// Waveform modes from Amazon's hwtcon_v2 ABI. The color modes were added with
+// the Colorsoft (Bellatrix4); see doc/colorsoft.md.
+constexpr uint32_t waveformGc16 = 2, waveformGl16 = 3, waveformGcc16 = 14, waveformAuto = 257;
+// FBIOGET_VSCREENINFO grayscale values on Bellatrix4 color panels.
+constexpr uint32_t grayscaleColor = 0, grayscaleColorNight = 3;
 bool validLayout(const Layout &layout);
 QImage initialFrame(const QSize &size, bool isColor = false);
 bool copyPixels(unsigned char *destination, const Layout &layout, const QImage &pixels, const QRect &area);

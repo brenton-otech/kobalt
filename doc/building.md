@@ -151,6 +151,16 @@ bash platforms/kindle/verify-package.sh pw3
 
 These commands select `localhost/kobuild:kindle-pw3`, keep application output under `build/kindle-pw3/`, and preserve a separate firmware 5.13.5 fixture under `build/kindle-pw3-sdk/`. The package is `build/kindle-pw3/Kobalt-kindle-pw3-prototype.zip`. Its launcher checks the package's runtime target before taking stock-UI ownership. Packaging obtains compiler runtime libraries from the compiler that configured the application. Verification rejects a mismatched target, floating-point ABI or interpreter and checks the full dependency closure against the selected firmware. Omitting the target retains the existing PW5 paths and hard-float checks. On Windows, run these Bash commands with Docker in WSL; the desktop native Qt lane remains Mac/Linux only. See [PW3 implementation and validation](pw3-sdk.md) for evidence and outstanding hardware checks.
 
+The Kindle Colorsoft uses the same hard-float `localhost/kobuild:kindle` image as PW5. Select its separate target:
+
+```sh
+bash platforms/kindle/build.sh colorsoft
+bash platforms/kindle/sdk/prepare-runtime.sh colorsoft
+bash platforms/kindle/verify-package.sh colorsoft
+```
+
+Output stays under `build/kindle-colorsoft/`, and the stock firmware 5.20.1 fixture stays under `build/kindle-colorsoft-sdk/`. That firmware ships glibc 2.35. The package keeps the glibc 2.20 symbol ceiling, so it also runs on older Colorsoft firmware. The package is `build/kindle-colorsoft/Kobalt-kindle-colorsoft-prototype.zip`. The display adapter detects the 32-bit color framebuffer at runtime. See [Kindle Colorsoft target](colorsoft.md) for the ABI evidence, display behavior, install steps and the kobuild target this SDK still needs.
+
 The application uses a native `hwtcon_v2` framebuffer backend on Paperwhite 11. It does not link or package FBInk. The backend preserves the firmware framebuffer mode, writes grayscale damage using the kernel stride, and submits updates through the matching firmware ioctl ABI. A worker waits for controller completion while Qt continues to handle input. The queue retains immutable image snapshots, combines pending damage, and cancels stale animation hints. Completion near the firmware's silent five-second timeout is treated as uncertain and returns through launcher recovery.
 
 The existing Page turn animations preference controls native swipe requests. The adapter enables this capability only when the configured waveform file matches the kernel's loaded waveform name and its header reports TL support. If firmware has unmounted the waveform volume, the probe reads its header through a temporary read-only mount and removes that mount immediately. The mount lives beneath the supervisor's run directory so recovery can unmount it if the app is killed during the probe. It never calls the stock waveform mount helper, which can format the partition on failure. Sleep, full refresh, coalesced pages and exit feedback suppress swipe. The firmware rotates swipe regions and directions. Set `KOBALT_KINDLE_DISPLAY_TRACE=1` when launching for submission and completion timings. Emulator timings do not establish physical panel latency.

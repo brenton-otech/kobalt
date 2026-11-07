@@ -8,17 +8,27 @@ mkdir -p "$scratch/app/launcher" "$scratch/system/lib"
 printf 'pw3\n' >"$scratch/app/launcher/runtime-target"
 touch "$scratch/system/lib/ld-linux.so.3"
 sh "$SCRIPT" "$scratch/app" "$scratch/system"
-printf 'pw5\n' >"$scratch/app/launcher/runtime-target"
-if sh "$SCRIPT" "$scratch/app" "$scratch/system"; then
-    echo 'Hard-float package accepted a softfp-only system.' >&2; exit 1
-fi
+for target in pw5 colorsoft; do
+    printf '%s\n' "$target" >"$scratch/app/launcher/runtime-target"
+    if sh "$SCRIPT" "$scratch/app" "$scratch/system"; then
+        echo "Hard-float $target package accepted a softfp-only system." >&2; exit 1
+    fi
+done
 rm "$scratch/system/lib/ld-linux.so.3"
 touch "$scratch/system/lib/ld-linux-armhf.so.3"
+sh "$SCRIPT" "$scratch/app" "$scratch/system"
+printf 'colorsoft\n' >"$scratch/app/launcher/runtime-target"
 sh "$SCRIPT" "$scratch/app" "$scratch/system"
 printf 'pw3\n' >"$scratch/app/launcher/runtime-target"
 if sh "$SCRIPT" "$scratch/app" "$scratch/system"; then
     echo 'PW3 package accepted a hard-float-only system.' >&2; exit 1
 fi
+touch "$scratch/system/lib/ld-linux.so.3"
+if sh "$SCRIPT" "$scratch/app" "$scratch/system"; then
+    echo 'PW3 package accepted a hard-float system with a compatibility loader link.' >&2; exit 1
+fi
+printf 'colorsoft\n' >"$scratch/app/launcher/runtime-target"
+sh "$SCRIPT" "$scratch/app" "$scratch/system"
 printf 'unknown\n' >"$scratch/app/launcher/runtime-target"
 if sh "$SCRIPT" "$scratch/app" "$scratch/system"; then
     echo 'Unknown target accepted.' >&2; exit 1

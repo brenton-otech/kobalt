@@ -95,6 +95,23 @@ int main(int argc, char **argv) {
     destWords = reinterpret_cast<const uint32_t *>(colorMemory.constData());
     const uint32_t sample = 0xff000000 | (1 << 16) | (1 << 8) | 0x42;
     check(destWords[1 * 8 + 1] == (sample ^ 0x00FFFFFF), "32bpp color inversion mismatch");
+    colorLayout.inverted = false;
+    colorLayout.swapRedBlue = true;
+    check(copyPixels(reinterpret_cast<uchar *>(colorMemory.data()), colorLayout, colorPixels, area),
+          "Red-first 32bpp color copy rejected");
+    destWords = reinterpret_cast<const uint32_t *>(colorMemory.constData());
+    // 0xff, R=1, G=1, B=0x42 becomes 0xff, B=0x42 in the high channel, G=1, R=1.
+    check(destWords[1 * 8 + 1] == (0xff000000u | (0x42u << 16) | (1u << 8) | 1u),
+          "Red-first 32bpp channel order mismatch");
+    colorLayout.inverted = true;
+    check(copyPixels(reinterpret_cast<uchar *>(colorMemory.data()), colorLayout, colorPixels, area),
+          "Inverted red-first 32bpp color copy rejected");
+    destWords = reinterpret_cast<const uint32_t *>(colorMemory.constData());
+    check(destWords[1 * 8 + 1] == ((0xff000000u | (0x42u << 16) | (1u << 8) | 1u) ^ 0x00FFFFFFu),
+          "Inverted red-first 32bpp color mismatch");
+    QImage grayForColor(5, 4, QImage::Format_Grayscale8);
+    check(!copyPixels(reinterpret_cast<uchar *>(colorMemory.data()), colorLayout, grayForColor, area),
+          "Gray snapshot accepted for a 32bpp framebuffer");
 
     const auto full = makeUpdate(QRect(0, 0, 1236, 1648), true, 42, 1, true);
     check(full.mode == 1 && full.waveform == 2 && full.marker == 42 && !full.flags &&
@@ -115,8 +132,14 @@ int main(int argc, char **argv) {
     check(colorFull.waveform == 14 && colorFull.mode == 1 && colorFull.marker == 50,
           "Color full refresh GCC16 waveform ABI incorrect");
     const auto colorPartial = makeUpdate(QRect(10, 20, 100, 200), false, 51, 0, false, true);
-    check(colorPartial.waveform == 257 && colorPartial.mode == 0 && colorPartial.marker == 51,
-          "Color partial refresh waveform ABI incorrect");
+    // AUTO on color panels flashes antialiased content as GC16 partial.
+    check(colorPartial.waveform == 3 && colorPartial.mode == 0 && colorPartial.marker == 51 && !colorPartial.flags,
+          "Color partial refresh must use non-flashing GL16");
+    const auto colorSwipe = makeUpdate(QRect(0, 0, 1264, 1680), false, 52, 1, true, true);
+    check(colorSwipe.flags == 0x10000 && colorSwipe.waveform == 257 && colorSwipe.swipeDirection == 2,
+          "Color swipe must leave waveform selection to the kernel");
+    const auto grayPartial = makeUpdate(QRect(10, 20, 100, 200), false, 53, 0, false);
+    check(grayPartial.waveform == 257, "Grayscale partial refresh no longer uses AUTO");
 
     // EPDC (Kindle PW3) alignment and ABI tests
     const auto emptyDamage = alignEpdcDamage({}, 1072);
