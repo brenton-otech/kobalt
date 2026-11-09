@@ -3,6 +3,7 @@
 #include "library/library_index.h"
 #include "platform/api/keyboard_controller.h"
 #include <functional>
+#include <utility>
 
 class QLineEdit;
 class QPushButton;
@@ -20,6 +21,25 @@ class AboutScreen;
 class BookPages;
 class FolderPage;
 class SortSheet;
+class FolderPicker;
+
+struct FolderLocation
+{
+    QString path, parent;
+    QStringList folders;
+    QString error;
+    QStringList books;
+
+    FolderLocation(QString path = {}, QString parent = {}, QStringList folders = {},
+                   QString error = {}, QStringList books = {})
+        : path(std::move(path)),
+          parent(std::move(parent)),
+          folders(std::move(folders)),
+          error(std::move(error)),
+          books(std::move(books))
+    {
+    }
+};
 
 // The Android and desktop library. It draws in device pixels on the reader's
 // canvas, with the reader's header, rows, pager and dialogs. The host owns the
@@ -41,10 +61,18 @@ public:
     // library itself is left.
     bool dismiss();
     void pageButton(int direction);
+    void showFolderPicker(const QString &path, bool books = false);
+
+    void showBookPicker(const QString &path) { showFolderPicker(path, true); }
+
+    void setFolderPickerLocation(const FolderLocation &location);
+    void setFolderPickerLoading(const QString &path);
+    void closeFolderPicker();
+    std::function<void(const QString &path)> browseFolder, chooseFolder, chooseBook;
 
     std::function<void(const QString &key)> openBook, removeFolder, removeBook;
     std::function<void(const QString &key, Book::Mark mark)> markBook;
-    std::function<void()> addFolder, openFile, rescan;
+    std::function<void()> addFolder, openFile, rescan, exitApp;
     std::function<void(const Settings &settings)> settingsChanged;
     // On Android a book opened on its own is Kobalt's copy, which removal
     // deletes. The confirmation says so.
@@ -70,6 +98,7 @@ private:
     SortSheet *sortSheet = nullptr;
     ui::ActionMenu *moreSheet = nullptr;
     FolderPage *folderPage = nullptr;
+    FolderPicker *folderPicker = nullptr;
     AboutScreen *about = nullptr;
     ui::ModalOverlay *overlay = nullptr;
     QTimer *throttle;

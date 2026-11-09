@@ -724,6 +724,197 @@ private:
     QVector<QWidget *> groups;
 };
 
+// A host-backed folder browser. Its header, rows and primary action match
+// Library folders; enumerating storage belongs to the host's worker.
+class FolderPicker final : public ui::Panel
+{
+public:
+    explicit FolderPicker(QWidget *parent) : ui::Panel(parent)
+    {
+        setObjectName("libraryFolderPicker");
+        back = new ui::CellButton(ui::ControlIcon::Back, this, chrome::backIcon);
+        back->setObjectName("libraryFolderPickerBack");
+        back->setRule(Qt::RightEdge);
+        back->setAccessibleName(strings::get("common.cancel"));
+        title = new ui::InterfaceLabel(strings::get("library.add_folder"), this);
+        title->setTextFormat(Qt::PlainText);
+        ui::readerStyle(title, ui::styles::brand(chrome::titleText) + "background:transparent;");
+        location = new ui::ListRow(this);
+        location->setObjectName("libraryFolderPickerLocation");
+        location->setAttribute(Qt::WA_TransparentForMouseEvents);
+        location->setFocusPolicy(Qt::NoFocus);
+        location->setDetail(strings::get("library.folder_picker_description"));
+        up = new ui::ListRow(this);
+        up->setObjectName("libraryFolderPickerUp");
+        up->setTitle(strings::get("library.parent_folder"));
+        up->setLeadingIcon(ui::ControlIcon::Back);
+        connect(up, &QPushButton::clicked, this, [this] {
+            const auto parent = data.parent;
+            if (navigate)
+                navigate(parent);
+        });
+        status = new ui::InterfaceLabel({}, this);
+        status->setObjectName("libraryFolderPickerStatus");
+        status->setWordWrap(true);
+        status->setTextFormat(Qt::PlainText);
+        status->setAlignment(Qt::AlignCenter);
+        ui::readerStyle(status,
+                        ui::styles::font(chrome::descriptionText) + "background:transparent;");
+        use = actionButton(this, strings::get("library.use_folder"), "libraryFolderPickerUse",
+                           true);
+        pager = new ui::PagerBar(this, "libraryFolderPicker");
+        connect(pager->previous, &QPushButton::clicked, this, [this] {
+            page = pager->turnTarget(-1);
+            arrange();
+        });
+        connect(pager->next, &QPushButton::clicked, this, [this] {
+            page = pager->turnTarget(1);
+            arrange();
+        });
+        hide();
+    }
+
+    ui::CellButton *back;
+    ui::ListRow *up;
+    QPushButton *use;
+    FolderLocation data;
+    std::function<void(const QString &)> navigate, open;
+
+    void setBookMode(bool value)
+    {
+        bookMode = value;
+        setProperty("selectBook", value);
+        title->setText(strings::get(value ? "library.open_book" : "library.add_folder"));
+        location->setDetail(strings::get(value ? "library.book_picker_description"
+                                               : "library.folder_picker_description"));
+    }
+
+    void loading(const QString &path)
+    {
+        busy = true;
+        data = { path, {}, {}, {} };
+        entries.clear();
+        page = 0;
+        refresh();
+    }
+
+    void present(const FolderLocation &value)
+    {
+        busy = false;
+        data = value;
+        entries = data.folders;
+        if (bookMode)
+            entries.append(data.books);
+        page = 0;
+        refresh();
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *) override { arrange(); }
+
+    void paintEvent(QPaintEvent *event) override
+    {
+        ui::Panel::paintEvent(event);
+        QPainter painter(this);
+        painter.fillRect(0, chrome::actionHeight - chrome::heavyRule, width(), chrome::heavyRule,
+                         palette().color(QPalette::WindowText));
+    }
+
+private:
+    QLabel *title, *status;
+    ui::ListRow *location;
+    ui::PagerBar *pager;
+    QVector<ui::ListRow *> rows;
+    QStringList entries;
+    bool busy = false;
+    bool bookMode = false;
+    int page = 0;
+
+    void refresh()
+    {
+        setProperty("loading", busy);
+        location->setTitle(data.path);
+        up->setDetail(data.parent);
+        use->setEnabled(!busy && data.error.isEmpty());
+        status->setText(busy ? strings::get("library.loading_folders")
+                                : !data.error.isEmpty()
+                                ? data.error
+                                : strings::get(bookMode ? "library.no_epubs_or_folders"
+                                                        : "library.no_subfolders"));
+        arrange();
+    }
+
+    void arrange()
+    {
+        const int bar = chrome::actionHeight - chrome::heavyRule;
+        back->setGeometry(0, 0, chrome::cellWidth, bar);
+        title->setGeometry(chrome::cellWidth + chrome::inset, 0,
+                           qMax(1, width() - chrome::cellWidth - 2 * chrome::inset), bar);
+        const int rowHeight = ui::metrics::list::twoLines;
+        location->setGeometry(0, chrome::actionHeight, width(), rowHeight);
+        int top = chrome::actionHeight + rowHeight;
+        const bool parent = !data.parent.isEmpty();
+        up->setVisible(parent);
+        if (parent) {
+            up->setGeometry(0, top, width(), rowHeight);
+            top += rowHeight;
+        }
+        use->setVisible(!bookMode);
+        const int footer = bookMode ? 0 : use->sizeHint().height() + 2 * chrome::inset;
+        use->setGeometry(chrome::inset, qMax(top, height() - footer) + chrome::inset,
+                         qMax(1, width() - 2 * chrome::inset), use->sizeHint().height());
+        const int available = qMax(1, height() - footer - top);
+        const bool paged = entries.size() > qMax(1, available / rowHeight);
+        const int capacity =
+                qMax(1, (available - (paged ? int(chrome::actionHeight) : 0)) / rowHeight);
+        const int count = qMax(1, (int(entries.size()) + capacity - 1) / capacity);
+        page = qBound(0, page, count - 1);
+        pager->setPage(page, count);
+        pager->setVisible(paged);
+        pager->setGeometry(0, height() - footer - chrome::actionHeight, width(),
+                           chrome::actionHeight);
+        const bool listing = !busy && data.error.isEmpty();
+        const int shown = listing ? qMin(capacity, int(entries.size()) - page * capacity) : 0;
+        while (rows.size() < shown) {
+            const int position = rows.size();
+            auto *row = new ui::ListRow(this);
+            row->setObjectName(QString("libraryFolderPickerRow%1").arg(position));
+            row->setAccessory(ui::ListRow::Chevron{});
+            connect(row, &QPushButton::clicked, this, [this, row] {
+                const auto path = row->property("folderPath").toString();
+                if (row->property("isBook").toBool()) {
+                    if (open)
+                        open(path);
+                } else if (navigate)
+                    navigate(path);
+            });
+            rows.append(row);
+        }
+        for (int i = 0; i < rows.size(); ++i) {
+            rows[i]->setVisible(i < shown);
+            if (i >= shown)
+                continue;
+            const int index = page * capacity + i;
+            const auto path = entries[index];
+            const bool isBook = bookMode && index >= data.folders.size();
+            rows[i]->setProperty("isBook", isBook);
+            rows[i]->setAccessory(isBook ? ui::ListRow::Accessory(ui::ListRow::None{})
+                                         : ui::ListRow::Accessory(ui::ListRow::Chevron{}));
+            rows[i]->setTitle(path.section('/', -1));
+            rows[i]->setDetail(path);
+            rows[i]->setProperty("folderPath", path);
+            rows[i]->setGeometry(0, top + i * rowHeight, width(), rowHeight);
+        }
+        status->setVisible(!listing || entries.isEmpty());
+        status->setGeometry(chrome::inset, top, qMax(1, width() - 2 * chrome::inset),
+                            qMax(1, available - (paged ? int(chrome::actionHeight) : 0)));
+        pager->setBlankArea(
+                { 0, top + shown * rowHeight, width(),
+                  qMax(0,
+                       available - shown * rowHeight - (paged ? int(chrome::actionHeight) : 0)) });
+    }
+};
+
 // The folders the library scans, with the controls to add, remove and rescan.
 class FolderPage final : public ui::Panel
 {
@@ -1168,7 +1359,9 @@ void LibraryView::pageButton(int direction)
         return;
     }
     ui::turnVisiblePageControl(
-            folderPage && folderPage->isVisible() ? static_cast<QWidget *>(folderPage) : this,
+            folderPicker && folderPicker->isVisible()       ? static_cast<QWidget *>(folderPicker)
+                    : folderPage && folderPage->isVisible() ? static_cast<QWidget *>(folderPage)
+                                                            : this,
             direction);
 }
 
@@ -1176,6 +1369,10 @@ bool LibraryView::dismiss()
 {
     if (overlay || (sortSheet && sortSheet->isVisible()) || (moreSheet && moreSheet->isVisible())) {
         closeOverlay();
+        return true;
+    }
+    if (folderPicker && folderPicker->isVisible()) {
+        closeFolderPicker();
         return true;
     }
     if (about && about->isVisible()) {
@@ -1347,6 +1544,8 @@ void LibraryView::arrange()
     empty->setGeometry(0, chrome::actionHeight, width(), qMax(1, height() - chrome::actionHeight));
     if (folderPage)
         folderPage->setGeometry(rect());
+    if (folderPicker)
+        folderPicker->setGeometry(rect());
     if (about)
         about->setGeometry(rect());
     if (overlay)
@@ -1530,12 +1729,19 @@ void LibraryView::showMoreSheet()
                         ui::actionItem(
                                 strings::get("library.about"), "libraryMoreAbout",
                                 ui::ControlIcon::About, [this] { showAbout(); }, true),
+                        ui::actionItem(strings::get("reader.exit"), "libraryMoreExit",
+                                       ui::ControlIcon::Close,
+                                       [this] {
+                                           if (exitApp)
+                                               QTimer::singleShot(0, this, exitApp);
+                                       }),
                 });
         moreSheet->setObjectName("libraryMoreSheet");
         moreSheet->dismissed = [this] { closeOverlay(); };
         moreSheet->setDimmed(true);
         setDark(dark);
     }
+    moreSheet->action("libraryMoreExit")->setVisible(bool(exitApp));
     moreSheet->setGeometry(rect());
     moreSheet->fitCard();
     moreSheet->show();
@@ -1585,5 +1791,57 @@ void LibraryView::showFolders()
     setDark(dark);
     folderPage->show();
     folderPage->raise();
+}
+
+void LibraryView::showFolderPicker(const QString &path, bool books)
+{
+    closeOverlay();
+    if (!folderPicker) {
+        folderPicker = new FolderPicker(this);
+        connect(folderPicker->back, &QPushButton::clicked, this, &LibraryView::closeFolderPicker);
+        folderPicker->navigate = [this](const QString &next) {
+            if (browseFolder)
+                browseFolder(next);
+        };
+        folderPicker->open = [this](const QString &path) {
+            closeFolderPicker();
+            if (chooseBook)
+                chooseBook(path);
+        };
+        connect(folderPicker->use, &QPushButton::clicked, this, [this] {
+            const auto path = folderPicker->data.path;
+            closeFolderPicker();
+            if (chooseFolder)
+                chooseFolder(path);
+        });
+    }
+    folderPicker->setBookMode(books);
+    folderPicker->setGeometry(rect());
+    folderPicker->loading(path);
+    setDark(dark);
+    folderPicker->show();
+    folderPicker->raise();
+    if (browseFolder)
+        browseFolder(path);
+}
+
+void LibraryView::setFolderPickerLoading(const QString &path)
+{
+    if (folderPicker && folderPicker->isVisible())
+        folderPicker->loading(path);
+}
+
+void LibraryView::setFolderPickerLocation(const FolderLocation &location)
+{
+    if (!folderPicker || !folderPicker->isVisible())
+        return;
+    folderPicker->present(location);
+    setDark(dark);
+}
+
+void LibraryView::closeFolderPicker()
+{
+    if (folderPicker)
+        folderPicker->hide();
 }
 } // namespace kobalt::library

@@ -180,6 +180,16 @@
 "library.search_placeholder" = "Title, author or series";
 "library.close_search" = "Close search";
 "library.add_folder" = "Add folder";
+"library.use_folder" = "Use this folder";
+"library.parent_folder" = "Parent folder";
+"library.folder_picker_description" = "EPUBs in subfolders are included.";
+"library.book_picker_description" = "Tap an EPUB to open it.";
+"library.no_epubs_or_folders" = "No EPUBs or subfolders in this folder.";
+"library.book_picker_unavailable" = "This EPUB is unavailable or cannot be read. Choose another book.";
+"library.loading_folders" = "Loading folders…";
+"library.no_subfolders" = "No subfolders. You can still use this folder.";
+"library.folder_picker_unavailable" = "This folder is unavailable or cannot be read. Choose another folder.";
+"library.folder_outside_storage" = "Choose a location inside Kindle storage.";
 "library.more" = "More";
 "library.exit_to_library" = "Library";
 "library.view_home" = "Home";

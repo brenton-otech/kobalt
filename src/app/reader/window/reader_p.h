@@ -547,6 +547,7 @@ private:
     void startClock(int now);
     int millisecondsOfDay() const;
     void updateMenuStatus();
+    void refreshStatus();
     void updateReadingStats();
     void configureNavigation();
     void activateNavigation(kobalt::NavigationDestination destination);

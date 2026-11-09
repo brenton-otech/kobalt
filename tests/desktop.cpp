@@ -11846,6 +11846,47 @@ private slots:
             view->findChild<QPushButton *>("libraryMoreFolders")->click();
             QTRY_VERIFY(view->findChild<QWidget *>("libraryFolders")->isVisible());
             QVERIFY(capture(fixture, name + "-folders-empty"));
+            // The Kindle host supplies local storage listings to this shared
+            // picker. Gallery data stays deterministic and reads no host folders.
+            view->addFolder = [view] { view->showFolderPicker("/mnt/us"); };
+            view->browseFolder = [view](const QString &path) {
+                view->setFolderPickerLocation(
+                        { path,
+                          {},
+                          { path + "/Books", path + "/documents", path + "/epubs" },
+                          {} });
+            };
+            view->findChild<QPushButton *>("libraryFoldersAdd")->click();
+            QTRY_VERIFY(view->findChild<QWidget *>("libraryFolderPicker")->isVisible());
+            QVERIFY(capture(fixture, name + "-folder-picker"));
+            view->setFolderPickerLocation({ "/mnt/us/Books",
+                                            "/mnt/us",
+                                            { "/mnt/us/Books/Classics", "/mnt/us/Books/Novels" },
+                                            {} });
+            QVERIFY(capture(fixture, name + "-folder-picker-nested"));
+            view->setFolderPickerLocation({ "/mnt/us/Books/Empty", "/mnt/us/Books", {}, {} });
+            QVERIFY(capture(fixture, name + "-folder-picker-empty"));
+            view->setFolderPickerLocation({ "/mnt/us/Books/Unavailable",
+                                            "/mnt/us/Books",
+                                            {},
+                                            strings::get("library.folder_picker_unavailable") });
+            QVERIFY(capture(fixture, name + "-folder-picker-error"));
+            view->closeFolderPicker();
+            view->findChild<QPushButton *>("libraryFoldersBack")->click();
+            view->findChild<QPushButton *>("libraryMore")->click();
+            QVERIFY(capture(fixture, name + "-book-picker-entry"));
+            view->showBookPicker("/mnt/us/epubs");
+            view->setFolderPickerLocation(
+                    { "/mnt/us/epubs",
+                      "/mnt/us",
+                      { "/mnt/us/epubs/Classics" },
+                      {},
+                      { "/mnt/us/epubs/Trevelyan's Type Tester.epub",
+                        "/mnt/us/epubs/A Book with a Longer Filename.EPUB" } });
+            QVERIFY(capture(fixture, name + "-book-picker"));
+            view->setFolderPickerLocation({ "/mnt/us/Empty", "/mnt/us", {}, {} });
+            QVERIFY(capture(fixture, name + "-book-picker-empty"));
+            view->closeFolderPicker();
         }
         for (const bool reading : { true, false }) {
             Fixture fixture(dark, false, true, reading);

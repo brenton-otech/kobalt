@@ -494,6 +494,8 @@ if(BUILD_TESTING)
             libraryActionButtons
             libraryAbout
             libraryFolderPicker
+            libraryLocalFolderPicker
+            librarySingleBookPicker
             libraryScanCaption
             libraryThemeSurface
             libraryCanvasFollowsViewport

@@ -422,6 +422,7 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook,
             lowBattery = !battery.charging && !battery.fullyCharged && battery.percent >= 0
                     && battery.percent <= 5;
             updateSleepBattery();
+            refreshStatus();
         });
     }
     book->onCheckpointFailed([this] { localSaveDue = true; });
@@ -619,20 +620,7 @@ void Reader::startClockTimer()
         book->minuteTick();
         if (minuteTicked)
             minuteTicked();
-        if (topControls->isVisible()) {
-            updateMenuStatus();
-            return;
-        }
-        if (!chromeTicks() || general->isVisible() || dictionaryPanel->isVisible()
-            || searchPanel->isVisible() || linksActive())
-            return;
-        const auto before = page->slotContents;
-        showChapterText();
-        if (page->slotContents == before)
-            return;
-        // A clock tick changes the strips, not the book page. Keep its damage
-        // out of the page-turn image and colour refresh policy.
-        page->refreshContent();
+        refreshStatus();
     });
     startClock();
 }

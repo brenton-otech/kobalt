@@ -52,6 +52,7 @@ void StartScreen::buildLibrary()
     view->openBook = [this](const QString &key) { emit bookRequested(key); };
     view->addFolder = [this] { emit addFolderRequested(); };
     view->openFile = [this] { emit libraryOpenRequested(); };
+    view->exitApp = [this] { emit libraryExitRequested(); };
     view->rescan = [this] { store.scan(); };
     view->removeFolder = [this](const QString &key) { emit removeFolderRequested(key); };
     view->removeBook = [this](const QString &key) { emit removeBookRequested(key); };

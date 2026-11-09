@@ -1,0 +1,53 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "kindle",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../../build/kindle",
+      "toolchainFile": "$env{KOBALT_KINDLE_QT}/lib/cmake/Qt6/qt.toolchain.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "KOBALT_KINDLE_TARGET": "pw5",
+        "QT_HOST_PATH": "$env{KOBALT_KINDLE_QT_HOST}",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/../../build/kindle/package/kobalt"
+      }
+    },
+    {
+      "name": "kindle-pw3",
+      "inherits": "kindle",
+      "binaryDir": "${sourceDir}/../../build/kindle-pw3",
+      "cacheVariables": {
+        "KOBALT_KINDLE_TARGET": "pw3",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/../../build/kindle-pw3/package/kobalt"
+      }
+    },
+    {
+      "name": "kindle-colorsoft",
+      "inherits": "kindle",
+      "binaryDir": "${sourceDir}/../../build/kindle-colorsoft",
+      "cacheVariables": {
+        "KOBALT_KINDLE_TARGET": "colorsoft",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/../../build/kindle-colorsoft/package/kobalt"
+      }
+    },
+    {
+      "name": "kindle-native",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../../build/kindle-native",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "KOBALT_KINDLE_NATIVE_TESTING": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {"name": "kindle", "configurePreset": "kindle", "jobs": 2},
+    {"name": "kindle-pw3", "configurePreset": "kindle-pw3", "jobs": 2},
+    {"name": "kindle-colorsoft", "configurePreset": "kindle-colorsoft", "jobs": 2},
+    {"name": "kindle-native", "configurePreset": "kindle-native", "jobs": 2}
+  ],
+  "testPresets": [
+    {"name": "kindle-native", "configurePreset": "kindle-native", "output": {"outputOnFailure": true}}
+  ]
+}

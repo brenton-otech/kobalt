@@ -274,8 +274,7 @@ void BatteryIndicator::setStatus(int value, bool pluggedIn)
         return;
     percent = value;
     charging = pluggedIn;
-    setText(percent < 0 ? strings::get("components.battery_unknown")
-                        : strings::get("common.percent").arg(percent));
+    setText(percent < 0 ? QString() : strings::get("common.percent").arg(percent));
     setAccessibleName(percent < 0
                               ? strings::get("components.battery_level_unavailable")
                               : strings::get("components.battery_percent")
@@ -414,6 +413,8 @@ QFont batteryTextFont(QFont font, qreal bodyHeight, int weight)
 
 void BatteryIndicator::paintEvent(QPaintEvent *event)
 {
+    if (percent < 0)
+        return;
     const bool privateText = needsPrivateText(text(), font());
     if (!privateText)
         InterfaceLabel::paintEvent(event);

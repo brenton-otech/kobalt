@@ -714,7 +714,7 @@ void diagnostic(const char *event, QJsonObject fields, DiagnosticSeverity severi
     }
     Entry entry{ {},       QByteArray(event),       std::move(fields),
                  severity, monotonicMilliseconds(), QDateTime::currentMSecsSinceEpoch() };
-#ifdef __linux__
+#if defined(__linux__) && defined(CLOCK_BOOTTIME)
     timespec boot{};
     if (clock_gettime(CLOCK_BOOTTIME, &boot) == 0)
         entry.boot = qint64(boot.tv_sec) * 1000 + boot.tv_nsec / 1000000;
