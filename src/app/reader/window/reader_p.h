@@ -417,6 +417,8 @@ private:
     kobalt::ReaderHostServices services;
     std::unique_ptr<kobalt::WindowPresentation> presentation;
     std::unique_ptr<kobalt::ReadingBook> book;
+    QCheckBox *airplaneModeOption = nullptr;
+    bool wifiRadioEnabled = false;
     kobalt::ReaderSession *session;
     QPointer<kobalt::ReaderOrientation> orientation;
     QPointer<kobalt::ui::ModalOverlay> syncDialog, finishDialog;
@@ -691,6 +693,7 @@ private:
     void startClock(int now);
     int millisecondsOfDay() const;
     void updateMenuStatus();
+    void refreshStatus();
     void updateReadingStats();
     void configureNavigation();
     void activateNavigation(kobalt::NavigationDestination destination);

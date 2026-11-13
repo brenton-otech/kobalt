@@ -35,3 +35,8 @@ Dismissal checks verify that appearance and Styling previews release their sourc
 Reader teardown checks observe child-panel callbacks through window destruction, with Text and Layout previews ready or still rendering and with Settings open. They reject callbacks after reader teardown starts without relying on an allocator to detect a destroyed member. These checks cover the observed panel subscriptions, not every possible widget callback lifetime.
 
 `component.ui` checks the shared button feedback: its triangle overlaps the target button, it can appear beside a button or below one at the top of the screen, a side offset moves the card without moving the arrow tip, it lets input pass through, and it dismisses automatically.
+
+The unofficial Colorsoft adapter supplies an optional queued radio-control service.
+`airplaneModeFollowsReportedRadio` in the lifecycle suite checks the requested
+state, confirmed state and rollback when the host reports a failed change.
+The full gallery includes the System Airplane mode entry on supported hosts.

@@ -398,6 +398,9 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook,
         services.holdWifiOff(this, [this] { return !closing && wifiPowerSaverApplies(); });
     if (services.observeWifi)
         services.observeWifi(this, [this](WifiStatus state) {
+            wifiRadioEnabled = state.enabled;
+            if (airplaneModeOption)
+                airplaneModeOption->setChecked(!state.enabled);
             if (menuWifi->setStatus(state.enabled, state.connected, state.strength)
                 && topControls->isVisible() && !lifecycleHidden)
                 syncNavigation();
@@ -439,6 +442,7 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook,
             lowBattery = !battery.charging && !battery.fullyCharged && battery.percent >= 0
                     && battery.percent <= 5;
             updateSleepBattery();
+            refreshStatus();
         });
     }
     book->onCheckpointFailed([this] { localSaveDue = true; });
@@ -657,20 +661,7 @@ void Reader::startClockTimer()
             book->minuteTick();
         if (minuteTicked)
             minuteTicked();
-        if (topControls->isVisible()) {
-            updateMenuStatus();
-            return;
-        }
-        if (!chromeTicks() || general->isVisible() || dictionaryPanel->isVisible()
-            || searchPanel->isVisible() || linksActive())
-            return;
-        const auto before = page->slotContents;
-        showChapterText();
-        if (page->slotContents == before)
-            return;
-        // A clock tick changes the strips, not the book page. Keep its damage
-        // out of the page-turn image and colour refresh policy.
-        page->refreshContent();
+        refreshStatus();
     });
     startClock();
 }
@@ -1373,6 +1364,7 @@ void Reader::buildSettings()
     settingsInputs.lightSupported = services.lightAvailable();
     settingsInputs.warmthSupported = warmthSupported;
     settingsInputs.sleepScreenSupported = presentation->supportsSleepScreen();
+    settingsInputs.wifiControlSupported = services.observeWifi && services.setWifiEnabled;
     settingsInputs.automaticBookOpeningSupported =
             services.automaticBookOpening && services.setAutomaticBookOpening;
     settingsInputs.wifiPowerSaverSupported = bool(services.turnOffWifi);
@@ -1456,6 +1448,7 @@ void Reader::buildSettings()
     menuViewButton = settings->menuViewButton;
     connect(menuViewButton, &QPushButton::clicked, this, [this] { openMenuView(); });
     minimalAnnotationOption = settings->minimalAnnotationOption;
+    airplaneModeOption = settings->airplaneModeOption;
     automaticOpeningOption = settings->automaticOpeningOption;
     hideTabLabelsOption = settings->hideTabLabelsOption;
     zenModeOption = settings->zenModeOption;
@@ -1625,6 +1618,9 @@ void Reader::buildSettings()
     settings->zenLightRequested = [this] { toggleLight(); };
     // Leaving Zen mode replaces the whole Settings layout.
     settings->zenLeft = [this] { requestFlash("zen-leave"); };
+    if (airplaneModeOption)
+        connect(airplaneModeOption, &QCheckBox::clicked, this,
+                [this](bool airplane) { services.setWifiEnabled(!airplane); });
     connect(refreshButton, &QPushButton::clicked, this, [this] { openScreenRefresh(); });
     connect(settings->openAcknowledgments, &QPushButton::clicked, this, [this] {
         kobalt::ui::PanelTiming timing("acknowledgments");

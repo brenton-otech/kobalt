@@ -1,0 +1,16 @@
+{
+  "manifest_version": 2,
+  "id": "kobalt",
+  "name": "Kobalt",
+  "author": "Kobalt contributors",
+  "description": "@description@",
+  "version": [
+    @version_major@,
+    @version_minor@,
+    @version_patch@
+  ],
+  "dependencies": [],
+  "supported_platforms": [
+    "kindlehf"
+  ]
+}

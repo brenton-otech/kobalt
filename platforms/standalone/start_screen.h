@@ -61,6 +61,7 @@ public:
                             std::function<void(int, bool)> choose);
 signals:
     void exitRequested();
+    void libraryExitRequested();
     // From the library: open one of its books, add a folder, or open and add
     // a single book.
     void bookRequested(QString key);

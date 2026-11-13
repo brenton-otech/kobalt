@@ -123,6 +123,10 @@ struct ReaderHostServices
     // context and reports cached state without blocking the reader thread.
     std::function<void(QObject *context, std::function<void(bool)> changed)> observeBluetooth;
     std::function<void(QObject *context, std::function<void(WifiStatus)> changed)> observeWifi;
+    // Optional radio control; requires observeWifi. The host turns wireless
+    // radios on or off without blocking the reader thread and reports the
+    // outcome through observeWifi, including when the change fails.
+    std::function<void(bool enabled)> setWifiEnabled;
     // Report consumed key activity to the host. The host identifies remote
     // input and retains its own radio inactivity policy.
     std::function<void(QObject *context, QKeyEvent *event)> remoteKeyActivity;

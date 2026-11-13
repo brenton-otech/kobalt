@@ -1,5 +1,8 @@
 # Building Kobalt
 
+For the unofficial Colorsoft port, see [Kindle maintenance](kindle-maintenance.md)
+for prepared SDKs, target build commands, versioned packages and validation.
+
 Application code lives in `src/` and `platforms/`. Shared assets live in root `assets/`. Pinned third-party source URLs, checksums, patches and CMake recipes live in `dependencies/`. Each platform owns its CMake project, presets and toolchain definitions. Generated files and incremental application objects stay under ignored `build/` in this worktree. Compiled third-party dependencies and their downloads live in the shared [dependency cache](#dependency-cache), which belongs to no worktree.
 
 Install CMake 3.22 or later on the build host. The Kobo and Android launchers also use it to read source provenance before starting their prepared container.

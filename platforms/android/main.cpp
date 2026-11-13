@@ -90,6 +90,7 @@ public:
         connect(start, &standalone::StartScreen::addFolderRequested, this,
                 [] { android::activity("chooseFolder"); });
         connect(start, &standalone::StartScreen::exitRequested, this, &QWidget::close);
+        connect(start, &standalone::StartScreen::libraryExitRequested, this, &QWidget::close);
         connect(start, &standalone::StartScreen::bookRequested, this, &Window::openLibraryBook);
         connect(start, &standalone::StartScreen::passageRequested, this,
                 [this](const QString &key, const QString &position) {

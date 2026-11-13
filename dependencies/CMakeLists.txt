@@ -41,7 +41,7 @@ endif()
 set(pkgconfig "${prefix}/lib/pkgconfig")
 if(KOBALT_QT_MAJOR EQUAL 5)
     string(APPEND pkgconfig ":${CMAKE_SYSROOT}/usr/lib/pkgconfig")
-elseif(KOBALT_QT_MAJOR EQUAL 6 AND NOT ANDROID)
+elseif(KOBALT_QT_MAJOR EQUAL 6 AND NOT ANDROID AND NOT KOBALT_KINDLE)
     string(APPEND pkgconfig ":/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig")
 endif()
 set(environment --unset=PKG_CONFIG_SYSROOT_DIR "PKG_CONFIG_PATH=${pkgconfig}" "PKG_CONFIG_LIBDIR=${pkgconfig}")
@@ -144,7 +144,7 @@ kobalt_source(crengine ${engine_options} PATCHES ${engine_patches})
 # Android builds pinned libpng. The Mac reuses libpng from its Qt SDK and Kobo
 # from its prepared SDK, so Kobo keeps the same libpng ABI as Qt; cache.cmake
 # finds those. Qt itself is never configured here.
-if(ANDROID)
+if(ANDROID OR KOBALT_KINDLE)
     kobalt_source(libpng)
     kobalt_library(libpng ARCHIVE libpng16.a OPTIONS -DPNG_SHARED=OFF -DPNG_STATIC=ON
         -DPNG_TESTS=OFF -DPNG_TOOLS=OFF)
@@ -158,7 +158,12 @@ else()
     file(CONFIGURE OUTPUT "${prefix}/lib/pkgconfig/libpng.pc" CONTENT
         "Name: libpng\nDescription: libpng from the SDK\nVersion: ${KOBALT_PNG_VERSION}\nLibs: ${png} -lz\nCflags: -I${png_include}\n" @ONLY)
 endif()
-file(CONFIGURE OUTPUT "${prefix}/lib/pkgconfig/zlib.pc" CONTENT "Name: zlib\nDescription: SDK zlib\nVersion: 1\nLibs: -lz\n" @ONLY)
+if(KOBALT_KINDLE)
+    file(CONFIGURE OUTPUT "${prefix}/lib/pkgconfig/zlib.pc" CONTENT
+        "Name: zlib\nDescription: SDK zlib\nVersion: ${ZLIB_VERSION_STRING}\nLibs: ${ZLIB_LIBRARY}\nCflags: -I${ZLIB_INCLUDE_DIR}\n" @ONLY)
+else()
+    file(CONFIGURE OUTPUT "${prefix}/lib/pkgconfig/zlib.pc" CONTENT "Name: zlib\nDescription: SDK zlib\nVersion: 1\nLibs: -lz\n" @ONLY)
+endif()
 kobalt_library(freetype ARCHIVE libfreetype.a DEPENDS ${png_dependency} OPTIONS -DFT_DISABLE_HARFBUZZ=ON -DFT_DISABLE_BZIP2=ON
     -DFT_DISABLE_BROTLI=ON -DFT_DISABLE_HVF=ON -DFT_DISABLE_PNG=OFF "-DPNG_LIBRARY=${png}" "-DPNG_PNG_INCLUDE_DIR=${png_include}")
 kobalt_library(harfbuzz ARCHIVE libharfbuzz.a DEPENDS dep-freetype OPTIONS -DHB_BUILD_UTILS=OFF

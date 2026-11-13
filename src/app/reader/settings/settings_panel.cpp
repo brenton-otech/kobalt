@@ -948,6 +948,14 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
             ui::makeCaptionButton(systemPage, nullptr, "rrTimeRemainingFormat",
                                   strings::get("settings.time_remaining_format"), [] { });
     systemRows->addWidget(timeRemainingFormatButton);
+    if (inputs.wifiControlSupported) {
+        section(systemPage, systemRows, "rrSystemWirelessSection",
+                strings::get("settings.section_wireless"));
+        airplaneModeOption =
+                check(systemPage, "rrAirplaneMode", strings::get("settings.airplane_mode"),
+                      strings::get("settings.airplane_mode_description"));
+        systemRows->addWidget(airplaneModeOption);
+    }
     section(systemPage, systemRows, "rrSystemSleepSection", strings::get("settings.section_sleep"));
     hideBookOnSleepOption = check(systemPage, "rrHideBookOnSleepScreen",
                                   strings::get("settings.hide_book_on_sleep_screen"),
@@ -1166,6 +1174,7 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
         automaticOpeningOption, minimalAnnotationOption,    hideBookOnSleepOption,
         saveWordsOption
     };
+    options.append(airplaneModeOption);
     options.append(openingCoverOption);
     options.prepend(zenModeOption);
     options.append(zenDarkOption);

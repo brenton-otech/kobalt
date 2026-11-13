@@ -1,0 +1,9 @@
+{
+  "upstream_version": "@upstream_version@",
+  "upstream_commit": "@KOBALT_KINDLE_UPSTREAM_COMMIT@",
+  "source_commit": "@source_commit@",
+  "source_modified": "@source_modified@",
+  "target": "@target@",
+  "revision": @build_revision@,
+  "sdk_image": "@sdk_id@"
+}

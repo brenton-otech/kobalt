@@ -312,6 +312,8 @@ bool Reader::hideNativeStatus() const
 
 void Reader::openSettings()
 {
+    if (airplaneModeOption)
+        airplaneModeOption->setChecked(!wifiRadioEnabled);
     if (session->temporaryTypography())
         return;
     kobalt::ui::PanelTiming timing("settings");

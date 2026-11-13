@@ -55,6 +55,7 @@ struct SettingsPanelInputs
     bool debugProgressAvailable = false;
     bool downloadableDictionaries = true;
     bool sleepScreenSupported = false;
+    bool wifiControlSupported = false;
     bool automaticBookOpeningSupported = false;
     // The host can turn Wi-Fi off when a book opens, or previews a host that can.
     bool wifiPowerSaverSupported = false;
@@ -166,6 +167,7 @@ public:
 
     std::function<void()> zenLightRequested, zenLeft;
     ui::DescribedOption *automaticOpeningOption = nullptr, *minimalAnnotationOption = nullptr;
+    ui::DescribedOption *airplaneModeOption = nullptr;
     ui::CaptionButton *defaultFontButton = nullptr, *uiFontButton = nullptr,
                       *uiMonoFontButton = nullptr, *headerFooterFontButton = nullptr,
                       *headerFooterWeightButton = nullptr;
