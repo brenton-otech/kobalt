@@ -56,7 +56,8 @@ include("${KOBALT_ROOT}/platforms/shared-inputs.cmake")
 file(GLOB_RECURSE shared CONFIGURE_DEPENDS "${source}/*.cpp" "${source}/*.h")
 # The scenario player is built only into evaluation builds.
 list(FILTER shared EXCLUDE REGEX "/src/scenario/")
-set(adapters main.cpp window.cpp window.h services.cpp services.h display.cpp device.cpp device.h properties.cpp properties.h)
+set(adapters main.cpp window.cpp window.h services.cpp services.h display.cpp device.cpp device.h properties.cpp properties.h
+    folder_browser.cpp folder_browser.h folder_picker_checks.cpp folder_picker_checks.h)
 list(TRANSFORM adapters PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 # The standalone library and start screen are shared with Android.
 file(GLOB standalone CONFIGURE_DEPENDS "${KOBALT_ROOT}/platforms/standalone/*.cpp" "${KOBALT_ROOT}/platforms/standalone/*.h")

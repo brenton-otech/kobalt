@@ -8,6 +8,7 @@
 #include "app/library/library_view.h"
 #include "app/reader/views/annotation_exporter.h"
 #include "platform/api/kobo_refresh.h"
+#include "folder_browser.h"
 #include "ui/style/fonts.h"
 #include <QCloseEvent>
 #include <QDir>
@@ -35,7 +36,8 @@ public:
     }
 };
 }
-Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder, QString root)
+Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder, QString root,
+               QString folderStorageRoot)
     : device(makeDevice()), controller(paths, std::move(fonts), std::move(placeholder),
                  [device = device, exports = paths.directory + QStringLiteral("/exports")] {
                      auto services = readerServices(device);
@@ -116,12 +118,30 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     };
     connect(start, &standalone::StartScreen::bookRequested, this, &Window::openBook);
     connect(start, &standalone::StartScreen::exitRequested, this, &Window::closeBook);
-    const auto fixedFolderNotice = [this] {
-        start->showLibraryError(tr("Copy EPUB books to %1, then choose Rescan all folders in Library folders. "
-                                  "Another folder can be selected with the --library launch option.").arg(libraryRoot));
+    folderBrowser = new FolderBrowser(folderStorageRoot, this);
+    auto *libraryView = start->library();
+    libraryView->browseFolder = [this](const QString &path) {
+        const auto *picker = start->library()->findChild<QWidget *>("libraryFolderPicker");
+        folderBrowser->navigate(path, picker && picker->property("selectBook").toBool());
     };
-    connect(start, &standalone::StartScreen::libraryOpenRequested, this, fixedFolderNotice);
-    connect(start, &standalone::StartScreen::addFolderRequested, this, fixedFolderNotice);
+    libraryView->chooseFolder = [this](const QString &path) { folderBrowser->select(path); };
+    libraryView->chooseBook = [this](const QString &path) { folderBrowser->selectBook(path); };
+    connect(folderBrowser, &FolderBrowser::bookSelected, this, &Window::openBook);
+    connect(folderBrowser, &FolderBrowser::loading, this,
+            [this](const QString &path) { start->library()->setFolderPickerLoading(path); });
+    connect(folderBrowser, &FolderBrowser::listed, this,
+            [this](const library::FolderLocation &location) {
+                start->library()->setFolderPickerLocation(location);
+            });
+    connect(folderBrowser, &FolderBrowser::selected, this, [this](const QString &path) {
+        if (!closing)
+            store.addFolder({ path, path.section('/', -1) });
+    });
+    connect(folderBrowser, &FolderBrowser::failed, start, &standalone::StartScreen::showLibraryError);
+    connect(start, &standalone::StartScreen::addFolderRequested, this,
+            [this, folderStorageRoot] { start->library()->showFolderPicker(folderStorageRoot); });
+    connect(start, &standalone::StartScreen::libraryOpenRequested, this,
+            [this, folderStorageRoot] { start->library()->showBookPicker(folderStorageRoot); });
     connect(start, &standalone::StartScreen::removeFolderRequested, &store, &library::Store::removeFolder);
     connect(start, &standalone::StartScreen::removeBookRequested, &store, &library::Store::removeBook);
     connect(start, &standalone::StartScreen::markUnreadRequested, this, [this](const QString &key) {
