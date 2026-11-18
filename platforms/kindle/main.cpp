@@ -1,16 +1,16 @@
 #include "window.h"
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
-#include "interfaces/reader/ui/style/fonts.h"
-#include "interfaces/reader/ui/style/scale.h"
-#include "interfaces/reader/views/reading_page.h"
+#include "ui/style/fonts.h"
+#include "ui/style/scale.h"
+#include "app/reader/views/reading_page.h"
 #include "reading/reading_density.h"
 #include "reading/header_footer.h"
 #include "support/diagnostics.h"
 #ifdef KOBALT_KINDLE_NATIVE_TESTING
 #include "captures.h"
 #include "input_checks.h"
-#include "reading/engine_worker.h"
+#include "engine/crengine/engine_worker.h"
 #include <QSemaphore>
 #endif
 #include <QApplication>

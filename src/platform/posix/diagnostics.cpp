@@ -187,12 +187,17 @@ DiagnosticSystem processDiagnosticSystem(DescriptorName name)
     system.sample = processSample;
     system.descriptors = [name = std::move(name)] { return descriptorSample(name); };
 #ifdef __linux__
+#ifdef CLOCK_BOOTTIME
     system.bootMilliseconds = [] {
         timespec boot{};
         return clock_gettime(CLOCK_BOOTTIME, &boot) == 0
                 ? qint64(boot.tv_sec) * 1000 + boot.tv_nsec / 1000000
                 : qint64(-1);
     };
+#else
+    // Older C libraries, such as the Kindle SDK, lack CLOCK_BOOTTIME; report it as unavailable.
+    system.bootMilliseconds = [] { return qint64(-1); };
+#endif
 #endif
     return system;
 }

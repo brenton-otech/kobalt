@@ -1,7 +1,7 @@
 #include "pointer_delivery.h"
 #include "sleep_frame.h"
-#include "ui/hold_timer.h"
-#include "platforms/android/canvas.h"
+#include "ui/input/hold_timer.h"
+#include "platforms/standalone/canvas.h"
 
 #include <QGuiApplication>
 #include <QSocketNotifier>
@@ -154,7 +154,7 @@ int main(int argc, char **argv)
         void mousePressEvent(QMouseEvent *event) override { pressed = event->timestamp(); }
         void mouseReleaseEvent(QMouseEvent *event) override { released = event->timestamp(); }
     };
-    kobalt::android::WidgetCanvas canvas(nullptr);
+    kobalt::standalone::WidgetCanvas canvas(nullptr);
     auto *widget = new StampWidget;
     canvas.setContent(widget);
     QPointingDevice device("Input regression", 1, QInputDevice::DeviceType::TouchScreen,

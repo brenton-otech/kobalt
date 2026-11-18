@@ -3,11 +3,12 @@
 #include "device.h"
 #include "pointer_cancellation.h"
 #include "qpa/sleep_frame.h"
-#include "platforms/android/canvas.h"
-#include "platforms/android/start_screen.h"
-#include "interfaces/library/library_view.h"
+#include "platforms/standalone/canvas.h"
+#include "platforms/standalone/start_screen.h"
+#include "app/library/library_view.h"
+#include "app/reader/views/annotation_exporter.h"
 #include "platform/api/kobo_refresh.h"
-#include "interfaces/reader/ui/style/fonts.h"
+#include "ui/style/fonts.h"
 #include <QCloseEvent>
 #include <QDir>
 #include <QFileInfo>
@@ -38,7 +39,9 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     : device(makeDevice()), controller(paths, std::move(fonts), std::move(placeholder),
                  [device = device, exports = paths.directory + QStringLiteral("/exports")] {
                      auto services = readerServices(device);
-                     services.annotationExportDirectory = [exports] { return exports; };
+                     services.annotationExporter = [exports](QWidget *reader) {
+                         return kobalt::reader::directoryAnnotationExporter(reader, exports);
+                     };
                      return services;
                  },
                  [](Qt::ScreenOrientation) {}),
@@ -79,10 +82,10 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
             standby.stop();
     });
     qApp->installEventFilter(this);
-    start = new android::StartScreen(readerServices(device).presentation, store, {}, stack);
-    connect(start, &android::StartScreen::libraryExitRequested, this, &QWidget::close);
+    start = new standalone::StartScreen(readerServices(device).presentation, store, {}, stack);
+    connect(start, &standalone::StartScreen::libraryExitRequested, this, &QWidget::close);
     start->setDark(controller.preferences().value("dark_mode").toBool(false));
-    canvas = new android::WidgetCanvas(stack);
+    canvas = new standalone::WidgetCanvas(stack);
     canvas->setObjectName("kindleReaderCanvas");
     stack->addWidget(start);
     stack->addWidget(canvas);
@@ -111,17 +114,17 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
             windowHandle()->setProperty("kobalt.pageTurnDirection", direction);
         }
     };
-    connect(start, &android::StartScreen::bookRequested, this, &Window::openBook);
-    connect(start, &android::StartScreen::exitRequested, this, &Window::closeBook);
+    connect(start, &standalone::StartScreen::bookRequested, this, &Window::openBook);
+    connect(start, &standalone::StartScreen::exitRequested, this, &Window::closeBook);
     const auto fixedFolderNotice = [this] {
         start->showLibraryError(tr("Copy EPUB books to %1, then choose Rescan all folders in Library folders. "
                                   "Another folder can be selected with the --library launch option.").arg(libraryRoot));
     };
-    connect(start, &android::StartScreen::libraryOpenRequested, this, fixedFolderNotice);
-    connect(start, &android::StartScreen::addFolderRequested, this, fixedFolderNotice);
-    connect(start, &android::StartScreen::removeFolderRequested, &store, &library::Store::removeFolder);
-    connect(start, &android::StartScreen::removeBookRequested, &store, &library::Store::removeBook);
-    connect(start, &android::StartScreen::markUnreadRequested, this, [this](const QString &key) {
+    connect(start, &standalone::StartScreen::libraryOpenRequested, this, fixedFolderNotice);
+    connect(start, &standalone::StartScreen::addFolderRequested, this, fixedFolderNotice);
+    connect(start, &standalone::StartScreen::removeFolderRequested, &store, &library::Store::removeFolder);
+    connect(start, &standalone::StartScreen::removeBookRequested, &store, &library::Store::removeBook);
+    connect(start, &standalone::StartScreen::markUnreadRequested, this, [this](const QString &key) {
         if (controller.resetBook(key))
             store.setMark(key, library::Book::Mark::Unread);
         else
@@ -132,8 +135,8 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
         libraryQuery = query;
         libraryKeyboard = readerServices(device).keyboard(start->library(), query);
     }
-    connect(&controller, &android::ReaderController::openingProgress, start, &android::StartScreen::setProgress);
-    connect(&controller, &android::ReaderController::opened, this, [this] {
+    connect(&controller, &standalone::ReaderController::openingProgress, start, &standalone::StartScreen::setProgress);
+    connect(&controller, &standalone::ReaderController::opened, this, [this] {
         auto *reader = controller.window();
         canvas->setContent(reader);
         stack->setCurrentWidget(canvas);
@@ -148,13 +151,13 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
         platform::pageRefresh(this, true);
         emit bookOpened();
     });
-    connect(&controller, &android::ReaderController::failed, this, [this](const QString &error) {
+    connect(&controller, &standalone::ReaderController::failed, this, [this](const QString &error) {
         failed = true;
         start->showLibraryError(error);
         stack->setCurrentWidget(start);
         emit bookFailed(error);
     });
-    connect(&controller, &android::ReaderController::retiring, this, [this] {
+    connect(&controller, &standalone::ReaderController::retiring, this, [this] {
         if (stack->currentWidget() != canvas || !controller.window())
             return;
         // Reader destruction precedes asynchronous engine/resource cleanup.
@@ -166,7 +169,7 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
         if (device->state().sleeping)
             sleepView->raise();
     });
-    connect(&controller, &android::ReaderController::closed, this, [this] {
+    connect(&controller, &standalone::ReaderController::closed, this, [this] {
         recordProgress();
         start->setDark(controller.preferences().value("dark_mode").toBool(false));
         if (!failed)

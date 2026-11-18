@@ -1,4 +1,5 @@
 #include "platform/api/kobo_refresh.h"
+#include "platform/api/loopback.h"
 #include <QApplication>
 #include <QWidget>
 #include <QWindow>
@@ -20,8 +21,9 @@ void pageRefresh(QWidget *, bool clean, bool) {
     }
 }
 void setReaderRefreshWindow(QWidget *) {}
+void coverRefresh(QWidget *) { }
 }
-namespace kobalt::nickel4 {
+namespace kobalt::platform {
 bool configureLoopback(int *error) {
     if (error)
         *error = ENOTSUP;

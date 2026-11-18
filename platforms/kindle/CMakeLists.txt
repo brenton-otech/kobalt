@@ -24,18 +24,18 @@ find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 get_filename_component(KOBALT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(source "${KOBALT_ROOT}/src")
-add_subdirectory("${KOBALT_ROOT}/dependencies" "${CMAKE_CURRENT_BINARY_DIR}/dependencies")
+foreach(retired KOBALT_DEPENDENCIES KOBALT_ASSETS)
+    unset(${retired} CACHE)
+endforeach()
+
+# Dependencies come from the shared cache, as on the other platforms. The
+# Kindle SDK supplies Qt, zlib and OpenSSL; the pinned libpng is built there.
+include("${KOBALT_ROOT}/dependencies/cache.cmake")
+kobalt_dependencies()
 add_subdirectory("${KOBALT_ROOT}/assets" "${CMAKE_CURRENT_BINARY_DIR}/assets")
+
 file(READ "${KOBALT_ASSETS}/manifest.json" assets)
 string(JSON KOBALT_VERSION GET "${assets}" version)
-file(READ "${CRENGINE_SOURCE}/cr3gui/data/html5.css" READER_HTML_CSS)
-configure_file("${source}/engine/crengine/reader_styles.h.in" reader_styles.h @ONLY)
-file(GLOB patterns RELATIVE "${CRENGINE_SOURCE}/cr3gui/data/hyph" "${CRENGINE_SOURCE}/cr3gui/data/hyph/*.pattern")
-list(SORT patterns)
-list(TRANSFORM patterns PREPEND "\"")
-list(TRANSFORM patterns APPEND "\"")
-list(JOIN patterns ", " READER_HYPHENATION_PATTERNS)
-configure_file("${source}/engine/crengine/reader_hyphenation.h.in" reader_hyphenation.h @ONLY)
 set(KOBALT_COMMIT "" CACHE STRING "Source commit supplied by the container launcher")
 option(KOBALT_COMMIT_MODIFIED "Source has uncommitted changes" OFF)
 if(NOT KOBALT_COMMIT)
@@ -49,24 +49,25 @@ if(NOT KOBALT_COMMIT)
 endif()
 configure_file("${source}/support/build_info.h.in" build_info.h @ONLY)
 
+# Generated engine headers, the cache policy and the shared definitions. The
+# Kindle target consumes them like the desktop, Kobo and Android projects.
+include("${KOBALT_ROOT}/platforms/shared-inputs.cmake")
+
 file(GLOB_RECURSE shared CONFIGURE_DEPENDS "${source}/*.cpp" "${source}/*.h")
 # The scenario player is built only into evaluation builds.
 list(FILTER shared EXCLUDE REGEX "/src/scenario/")
-list(REMOVE_ITEM shared "${source}/publication/loopback.cpp")
-set(adapters main.cpp window.cpp window.h services.cpp services.h display.cpp device.cpp device.h properties.cpp properties.h
-    ../android/reader.cpp ../android/reader.h ../android/start_screen.cpp ../android/start_screen.h)
+set(adapters main.cpp window.cpp window.h services.cpp services.h display.cpp device.cpp device.h properties.cpp properties.h)
 list(TRANSFORM adapters PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
-qt_add_executable(kobalt_kindle ${shared} ${adapters})
+# The standalone library and start screen are shared with Android.
+file(GLOB standalone CONFIGURE_DEPENDS "${KOBALT_ROOT}/platforms/standalone/*.cpp" "${KOBALT_ROOT}/platforms/standalone/*.h")
+qt_add_executable(kobalt_kindle ${shared} ${adapters} ${standalone})
 set_target_properties(kobalt_kindle PROPERTIES OUTPUT_NAME kobalt RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-target_include_directories(kobalt_kindle PRIVATE "${KOBALT_ROOT}" "${source}" "${CMAKE_CURRENT_BINARY_DIR}"
-    "${source}/interfaces/reader/ui/controls")
+target_include_directories(kobalt_kindle PRIVATE "${KOBALT_ROOT}" "${source}" "${CMAKE_CURRENT_BINARY_DIR}")
 target_include_directories(kobalt_kindle SYSTEM PRIVATE "${CRENGINE_SOURCE}/crengine/include" "${CRENGINE_BUILD}"
     "${prefix}/include" "${prefix}/include/harfbuzz" "${prefix}/include/freetype2" "${prefix}/include/fribidi"
     "${KOBALT_TEST_PNG_INCLUDE}")
 target_compile_options(kobalt_kindle PRIVATE -Wall -Wextra)
-include("${KOBALT_ROOT}/platforms/cache-policy.cmake")
-target_compile_definitions(kobalt_kindle PRIVATE KOBALT_READER_HARDWARE KOBALT_VERSION="${KOBALT_VERSION}"
-    KOBALT_LAYOUT_POLICY="${layout_policy}")
+target_compile_definitions(kobalt_kindle PRIVATE ${kobalt_shared_definitions})
 if(APPLE)
     set(engine "${CRENGINE_BUILD}/libcrengine.a")
     target_compile_definitions(kobalt_kindle PRIVATE fdatasync=fsync)
@@ -78,12 +79,10 @@ else()
             --redefine-sym FT_Render_Glyph=kobalt_font_render_glyph "${CRENGINE_BUILD}/libcrengine.a" "${engine}"
         DEPENDS "${CRENGINE_BUILD}/libcrengine.a" VERBATIM)
     add_custom_target(kindle-engine DEPENDS "${engine}")
-    add_dependencies(kindle-engine kobalt-dependencies)
     add_dependencies(kobalt_kindle kindle-engine)
     target_link_options(kobalt_kindle PRIVATE -Wl,--no-undefined -Wl,--exclude-libs,ALL
         "LINKER:--whole-archive,${prefix}/lib/libfreetype.a,--no-whole-archive")
 endif()
-add_dependencies(kobalt_kindle kobalt-dependencies)
 target_link_libraries(kobalt_kindle PRIVATE Qt6::Widgets Qt6::Network Qt6::Sensors Qt6::Sql "${engine}"
     "${prefix}/lib/libharfbuzz.a" "${prefix}/lib/libxxhash.a" "${prefix}/lib/libutf8proc.a"
     "${prefix}/lib/libjpeg.a" "${prefix}/lib/liblunasvg.a" "${prefix}/lib/libfreetype.a"
@@ -92,15 +91,15 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(kobalt_kindle PRIVATE dl pthread rt)
     set_target_properties(kobalt_kindle PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
 endif()
-set(resources "${KOBALT_ROOT}/assets")
-file(GLOB notices CONFIGURE_DEPENDS "${resources}/notices/*")
-qt_add_resources(kobalt_kindle notices PREFIX "/kobalt" BASE "${resources}"
-    FILES "${resources}/acknowledgments.json" ${notices})
+qt_add_resources(kobalt_kindle kobalt_notices PREFIX "/kobalt" BASE "${kobalt_notice_base}"
+    FILES ${kobalt_notice_resources})
+file(GLOB_RECURSE KOBALT_ASSET_FILES CONFIGURE_DEPENDS "${KOBALT_ASSETS}/*")
 add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/bin/assets/manifest.json"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${KOBALT_ASSETS}" "${CMAKE_BINARY_DIR}/bin/assets"
-    DEPENDS ${KOBALT_ASSET_INPUTS} VERBATIM)
+    DEPENDS ${KOBALT_ASSET_FILES} VERBATIM)
 add_custom_target(kindle-assets DEPENDS "${CMAKE_BINARY_DIR}/bin/assets/manifest.json")
 add_dependencies(kobalt_kindle kindle-assets)
+
 add_executable(kobalt-device-info device_info.cpp device.cpp device.h properties.cpp properties.h)
 target_include_directories(kobalt-device-info PRIVATE "${source}")
 target_compile_options(kobalt-device-info PRIVATE -Wall -Wextra -Werror)

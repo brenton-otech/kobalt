@@ -1,5 +1,7 @@
 #pragma once
-#include "platforms/android/reader.h"
+#include "platforms/standalone/canvas.h"
+#include "platforms/standalone/reader.h"
+#include "platforms/standalone/start_screen.h"
 #include "library/library_store.h"
 #include <QWidget>
 
@@ -43,12 +45,12 @@ protected:
     bool eventFilter(QObject *, QEvent *) override;
 private:
     std::shared_ptr<Device> device;
-    android::ReaderController controller;
+    standalone::ReaderController controller;
     library::Store store;
     QString openedKey, libraryRoot, pendingOpen;
     QStackedWidget *stack;
-    android::StartScreen *start;
-    android::WidgetCanvas *canvas;
+    standalone::StartScreen *start;
+    standalone::WidgetCanvas *canvas;
     QLabel *sleepView, *retirementView;
     QTimer standby;
     std::unique_ptr<KeyboardController> libraryKeyboard;

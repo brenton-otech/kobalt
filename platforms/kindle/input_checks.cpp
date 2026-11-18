@@ -1,10 +1,10 @@
 #include "input_checks.h"
 #include "window.h"
-#include "platforms/android/canvas.h"
-#include "platforms/android/start_screen.h"
-#include "interfaces/library/library_view.h"
-#include "interfaces/reader_window.h"
-#include "interfaces/reader/views/reading_page.h"
+#include "platforms/standalone/canvas.h"
+#include "platforms/standalone/start_screen.h"
+#include "app/library/library_view.h"
+#include "app/reader_window.h"
+#include "app/reader/views/reading_page.h"
 #include <QApplication>
 #include <QDebug>
 #include <QMouseEvent>
@@ -21,7 +21,7 @@ namespace kobalt::kindle {
 namespace {
 class Pointer {
 public:
-    Pointer(Window &window, android::WidgetCanvas &canvas, QWidget &target, QPoint point)
+    Pointer(Window &window, standalone::WidgetCanvas &canvas, QWidget &target, QPoint point)
         : window(window), canvas(canvas) {
         const auto contentPoint = target.mapTo(canvas.content, point);
         local = canvas.mapFromScene(canvas.content->graphicsProxyWidget()->mapToScene(contentPoint));
@@ -42,7 +42,7 @@ public:
     }
 private:
     Window &window;
-    android::WidgetCanvas &canvas;
+    standalone::WidgetCanvas &canvas;
     QPoint local;
 };
 bool checkKeyboard(QLineEdit &query) {
@@ -100,7 +100,7 @@ bool checkKeyboard(QLineEdit &query) {
 }
 
 bool checkLibraryInput(Window &window) {
-    auto *start = window.findChild<android::StartScreen *>();
+    auto *start = window.findChild<standalone::StartScreen *>();
     if (!start || !start->libraryShown())
         return false;
     auto *view = start->library();
@@ -168,7 +168,7 @@ bool checkLibraryInput(Window &window) {
 }
 
 bool checkReaderInput(Window &window, ReadingPage &page) {
-    auto *canvas = static_cast<android::WidgetCanvas *>(window.findChild<QGraphicsView *>("kindleReaderCanvas"));
+    auto *canvas = static_cast<standalone::WidgetCanvas *>(window.findChild<QGraphicsView *>("kindleReaderCanvas"));
     if (!canvas || canvas->content != page.window())
         return false;
     const auto sleep = window.readerWindow()->powerScreenSnapshot();
@@ -255,7 +255,7 @@ bool checkReaderInput(Window &window, ReadingPage &page) {
         if (!page.slotContents[2].text.contains("44"))
             return false;
     }
-    auto *start = window.findChild<android::StartScreen *>();
+    auto *start = window.findChild<standalone::StartScreen *>();
     auto *libraryKeyboard = start ? start->library()->findChild<QWidget *>("widgetKeyboard") : nullptr;
     if (!libraryKeyboard || !libraryKeyboard->isHidden())
         return false;

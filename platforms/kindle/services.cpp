@@ -1,7 +1,8 @@
 #include "services.h"
 #include "device.h"
-#include "interfaces/reader/ui/style/fonts.h"
-#include "interfaces/reader/ui/controls/keyboard.h"
+#include "ui/style/fonts.h"
+#include "ui/controls/keyboard.h"
+#include "platform/api/page_animation_support.h"
 #include "support/strings.h"
 #include <QKeyEvent>
 #include <QGuiApplication>
@@ -115,8 +116,9 @@ ReaderHostServices readerServices(std::shared_ptr<Device> device) {
     };
     result.systemRotation = true;
     result.downloadableDictionaries = true;
-    result.animationsAvailable = [] {
-        return qApp && qApp->property("kobalt.swipeAvailable").toBool();
+    result.animationSupport = [] {
+        return qApp && qApp->property("kobalt.swipeAvailable").toBool() ? PageAnimationSupport::Supported
+                                                                        : PageAnimationSupport::Unavailable;
     };
     result.cancelAnimation = [] {
         for (auto *surface : QApplication::topLevelWidgets()) {
