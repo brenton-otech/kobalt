@@ -286,6 +286,14 @@ int main()
                         == strings::get("common.percent").arg(100),
                 "The last page is not 100%");
     }
+    // Unknown battery data is hidden; a valid zero remains visible.
+    for (int percent : {-1, 101, 0}) {
+        auto sample = values;
+        sample.battery = percent;
+        for (auto field : {Field::Battery, Field::BatteryPercent, Field::BatteryWarning})
+            require(content(field, sample, false).empty() == (percent != 0),
+                    "Unknown battery must be hidden while a valid zero remains visible");
+    }
     // Battery warning shows the battery only below its threshold.
     require(content(Field::BatteryWarning, values, false).empty(), "Battery warning showed at 80%");
     {
