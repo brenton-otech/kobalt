@@ -58,6 +58,7 @@ configure_file(package-sdk.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/package-sdk.cma
 file(GLOB_RECURSE shared CONFIGURE_DEPENDS "${source}/*.cpp" "${source}/*.h")
 # The scenario player is built only into evaluation builds.
 list(FILTER shared EXCLUDE REGEX "/src/scenario/")
+# Blaze builds as its own project; only its adapter belongs to the application.
 list(FILTER shared EXCLUDE REGEX "/src/engine/blaze/")
 file(GLOB_RECURSE engine_adapter CONFIGURE_DEPENDS "${source}/engine/blaze/adapter/*.cpp" "${source}/engine/blaze/adapter/*.h")
 list(APPEND shared ${engine_adapter})

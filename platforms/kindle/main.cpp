@@ -11,7 +11,7 @@
 #ifdef KOBALT_KINDLE_NATIVE_TESTING
 #  include "captures.h"
 #  include "input_checks.h"
-#  include "engine/crengine/engine_worker.h"
+#  include "engine/engine_worker.h"
 #  include <QSemaphore>
 #endif
 #include <QApplication>
