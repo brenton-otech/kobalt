@@ -190,8 +190,9 @@ services when the framebuffer is 32-bit.
 
 The bezel covers the bottom edge of the framebuffer: firmware 5.20.1 reports
 1272×1696 pixels for a 1264×1680 panel, and footer text in the last rows sat
-under the bezel. Colorsoft builds keep text and controls 24 pixels (about 2 mm)
-above the bottom edge. The reader receives this band through the host safe
+under the bezel. Colorsoft builds keep text and controls 12 pixels (about 1 mm)
+above the bottom edge; on the device 24 pixels cleared the bezel with room to
+spare, and 12 was chosen. The reader receives this band through the host safe
 area, and paper fills it; the Library and the opening view end above it. The
 value is `colorsoftBottomInset` in `platforms/kindle/display_inset.h`. PW3 and
 PW5 builds use the whole framebuffer, and the package smoke check asserts the
