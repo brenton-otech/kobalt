@@ -9,8 +9,8 @@ APP=${KOBALT_KPM_APP:-/mnt/us/kobalt}
 DOCUMENTS=${KOBALT_KPM_DOCUMENTS:-/mnt/us/documents}
 RUN_DIR=${KOBALT_KPM_RUN_DIR:-/var/tmp/kobalt-kindle-prototype}
 LIST="$APP/kpm-installed.txt"
-# Library entries: the default launch and the opt-in paused-UI launch.
-SCRIPTLETS="Kobalt.sh Kobalt-pause.sh"
+# Library entries: the default launch and the stop-the-stock-UI fallback.
+SCRIPTLETS="Kobalt.sh Kobalt-stop.sh"
 
 if [ -d "$RUN_DIR" ]; then
     echo "Kobalt is running, or its previous supervisor failed ($RUN_DIR). Exit Kobalt first." >&2
@@ -56,4 +56,4 @@ mkdir -p "$DOCUMENTS"
 for scriptlet in $SCRIPTLETS; do
     cp -f "scriptlets/$scriptlet" "$DOCUMENTS/$scriptlet"
 done
-echo "Kobalt installed. Open \"Kobalt\" in the Library to start it, or \"Kobalt (pause stock UI)\" to keep the stock UI paused."
+echo "Kobalt installed. Open \"Kobalt\" in the Library to start it, or \"Kobalt (stop stock UI)\" to stop the stock UI instead of pausing it."

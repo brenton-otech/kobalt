@@ -7,7 +7,7 @@ RUN_DIR=$2
 # stop shuts the framework down and cold-boots it on exit.
 UI_MODE=$3
 shift 3
-case "$UI_MODE" in pause|stop) ;; *) echo "Unknown stock UI mode: $UI_MODE" >&2; exit 1 ;; esac
+case "$UI_MODE" in pause|stop) ;; *) say "Unknown stock UI mode: $UI_MODE"; exit 1 ;; esac
 framework_stopped=no
 pillow_disabled=no
 awesome_held=no
@@ -21,6 +21,13 @@ screensaver_loaded=no
 recovery_complete=no
 cd / || exit 1
 
+# Every supervisor line carries UTC time, so a device log can be ordered
+# against sleep, USB and the reader's own events.
+say()
+{
+    echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) $*" >&2
+}
+
 # Stock LIPC clients and Upstart requests can stall too. In particular, a
 # stuck screensaver reload must not prevent attempting to restore the GUI.
 # Run only short-lived stock clients here, never the reader or its saves.
@@ -33,7 +40,7 @@ bounded_stock()
     command_pid=$!
     while kill -0 "$command_pid" 2>/dev/null; do
         if [ "$command_ticks" -le 0 ]; then
-            echo "Stock command timed out: $*" >&2
+            say "Stock command timed out: $*"
             kill -KILL "$command_pid" 2>/dev/null || :
             wait "$command_pid" 2>/dev/null || :
             return 124
@@ -77,7 +84,7 @@ wait_for_module()
 log_memory()
 {
     [ -r /proc/meminfo ] || return 0
-    echo "memory $1: $(grep -E '^(MemFree|MemAvailable):' /proc/meminfo 2>/dev/null | tr -s ' \n' ' ')"
+    say "memory $1: $(grep -E '^(MemFree|MemAvailable):' /proc/meminfo 2>/dev/null | tr -s ' \n' ' ')"
 }
 
 # Compare dotted firmware versions on their first three numeric fields.
@@ -116,25 +123,30 @@ restore_screensaver()
     wait_for_module screensaver yes
 }
 
-restore_home()
+confirm_home()
 {
-    # Colorsoft can restart all GUI services without activating an application,
-    # leaving our exit frame on the panel. Service startup alone is not handoff.
-    [ "$(cat "$APP_DIR/launcher/runtime-target" 2>/dev/null)" = colorsoft ] || return 0
-    echo 'Opening stock Kindle Home.' >&2
+    # A started service is not a usable stock UI: on Colorsoft firmware 5.20 a
+    # restarted framework can come back without an active application and
+    # wake to a white screen. Wait until appmgrd reports an active stock
+    # booklet. The Colorsoft does not open Home by itself, so request it there
+    # and repeat the request while the framework starts.
+    request_home=no
+    [ "$(cat "$APP_DIR/launcher/runtime-target" 2>/dev/null)" != colorsoft ] || request_home=yes
+    [ "$request_home" = no ] || say 'Opening stock Kindle Home.'
     home_attempts=0
-    while [ "$home_attempts" -lt 60 ]; do
-        # Do not wait for frameworkStarted: Colorsoft can leave it zero until
-        # an app is activated. Let appmgrd queue Home while the UI starts;
-        # retry transient service failures without blocking recovery forever.
-        if bounded_stock 10 lipc-set-prop com.lab126.appmgrd start app://com.lab126.booklet.home; then
-            echo 'Stock Kindle Home activation request completed.' >&2
-            return 0
+    while [ "$home_attempts" -lt "${KOBALT_KINDLE_HOME_WAIT:-600}" ]; do
+        if [ "$request_home" = yes ] && [ $((home_attempts % 10)) = 0 ]; then
+            bounded_stock 10 lipc-set-prop com.lab126.appmgrd start app://com.lab126.booklet.home &&
+                say 'Stock Kindle Home activation requested.'
         fi
+        active_app=$(bounded_stock 20 lipc-get-prop -s -q com.lab126.appmgrd activeApp) || active_app=
+        case "$active_app" in
+            *com.lab126.booklet.*) say "Stock Kindle application active: $active_app"; return 0 ;;
+        esac
         usleep 1000000 || return 1
         home_attempts=$((home_attempts + 1))
     done
-    echo 'Kindle Home activation requests did not succeed.' >&2
+    say 'No stock Kindle application became active.'
     return 1
 }
 
@@ -178,19 +190,19 @@ restore_waveform_mounts()
         [ -e "$probe" ] || [ -L "$probe" ] || continue
         if [ ! -d "$probe" ] || [ -L "$probe" ]; then
             waveform_restored=no
-            echo "Unexpected waveform recovery entry: $probe" >&2
+            say "Unexpected waveform recovery entry: $probe"
             continue
         fi
         if [ -r /proc/mounts ] && grep -Fq " $probe " /proc/mounts; then
             if ! umount -i "$probe"; then
                 waveform_restored=no
-                echo "Could not unmount read-only waveform probe: $probe" >&2
+                say "Could not unmount read-only waveform probe: $probe"
                 continue
             fi
         fi
         if ! rmdir "$probe"; then
             waveform_restored=no
-            echo "Could not remove waveform probe directory: $probe" >&2
+            say "Could not remove waveform probe directory: $probe"
         fi
     done
 }
@@ -198,7 +210,7 @@ restore_waveform_mounts()
 recover()
 {
     trap '' HUP INT TERM
-    echo "Kobalt recovery started (app status $exit_status)." >&2
+    say "Kobalt recovery started (app status $exit_status)."
     if [ -n "$child" ]; then
         kill -TERM "$child" 2>/dev/null || :
         attempts=0
@@ -207,25 +219,25 @@ recover()
             attempts=$((attempts + 1))
         done
         if kill -0 "$child" 2>/dev/null; then
-            echo 'Kobalt did not stop within ten seconds; forcing exit before recovery.' >&2
+            say 'Kobalt did not stop within ten seconds; forcing exit before recovery.'
             kill -KILL "$child" 2>/dev/null || :
         fi
         wait "$child" 2>/dev/null || :
     fi
-    stop_bridge || echo 'Could not inspect the power bridge PID.' >&2
+    stop_bridge || say 'Could not inspect the power bridge PID.'
     restore_waveform_mounts
     if [ "$volume_held" = yes ]; then
         if kill -CONT "$volume_pid" 2>/dev/null; then
             volume_held=no
         else
-            echo "Could not resume volumd PID $volume_pid. Recovery files remain in $RUN_DIR." >&2
+            say "Could not resume volumd PID $volume_pid. Recovery files remain in $RUN_DIR."
         fi
     fi
     if [ "$awesome_held" = yes ] || [ "$pillow_disabled" = yes ]; then
         screen_restored=yes
         if ! restore_screensaver; then
             screen_restored=no
-            echo 'Could not reload stock screensaver. Recovery files remain.' >&2
+            say 'Could not reload stock screensaver. Recovery files remain.'
         fi
         if [ "$awesome_held" = yes ]; then
             awesome_resumed=yes
@@ -238,7 +250,7 @@ recover()
             if [ "$awesome_resumed" = yes ]; then
                 awesome_held=no
             else
-                echo "Could not resume awesome PIDs $awesome_pids. Run 'kill -CONT $awesome_pids' from SSH." >&2
+                say "Could not resume awesome PIDs $awesome_pids. Run 'kill -CONT $awesome_pids' from SSH."
                 return
             fi
         fi
@@ -251,9 +263,9 @@ recover()
             if bounded_stock 50 lipc-set-prop com.lab126.pillow disableEnablePillow enable; then
                 pillow_disabled=no
                 bounded_stock 50 lipc-set-prop com.lab126.appmgrd start app://com.lab126.booklet.home ||
-                    echo 'Could not ask the stock UI to show Home.' >&2
+                    say 'Could not ask the stock UI to show Home.'
             else
-                echo "Could not enable pillow. Run 'lipc-set-prop com.lab126.pillow disableEnablePillow enable' from SSH." >&2
+                say "Could not enable pillow. Run 'lipc-set-prop com.lab126.pillow disableEnablePillow enable' from SSH."
                 return
             fi
         fi
@@ -261,22 +273,22 @@ recover()
     fi
     if [ "$framework_stopped" = yes ]; then
         screen_restored=yes
-        echo 'Restoring stock screensaver.' >&2
+        say 'Restoring stock screensaver.'
         if ! restore_screensaver; then
             screen_restored=no
-            echo 'Could not reload stock screensaver. Recovery files remain.' >&2
+            say 'Could not reload stock screensaver. Recovery files remain.'
         fi
-        echo 'Starting stock Kindle interface.' >&2
+        say 'Starting stock Kindle interface.'
         if bounded_stock 150 start lab126_gui; then
             framework_stopped=no
-            echo 'Stock Kindle interface start request completed.' >&2
+            say 'Stock Kindle interface start request completed.'
         else
-            echo "Could not restart lab126_gui. Run 'start lab126_gui' from SSH." >&2
+            say "Could not restart lab126_gui. Run 'start lab126_gui' from SSH."
             # Retain the lock and this recovery script after a restoration failure.
             return
         fi
-        if ! restore_home; then
-            echo 'Could not activate Kindle Home. Recovery files remain.' >&2
+        if ! confirm_home; then
+            say 'Could not confirm an active Kindle Home. Recovery files remain; restart the Kindle if the screen stays blank.'
             return
         fi
         [ "$screen_restored" = yes ] || return
@@ -307,34 +319,35 @@ trap cleanup EXIT
 trap terminate INT TERM
 trap '' HUP
 echo "$$" >"$RUN_DIR/pid"
+say "Kobalt supervisor started: target $(cat "$APP_DIR/launcher/runtime-target" 2>/dev/null), stock UI $UI_MODE."
 
-state=$(status lab126_gui 2>&1) || { echo "$state" >&2; exit 1; }
+state=$(status lab126_gui 2>&1) || { say "$state"; exit 1; }
 case "$state" in
     *'start/running'*) ;;
-    *) echo "Refusing to launch: lab126_gui is not running: $state" >&2; exit 1 ;;
+    *) say "Refusing to launch: lab126_gui is not running: $state"; exit 1 ;;
 esac
 
 if has_module screensaver; then
     screensaver_loaded=yes
 else
     module_status=$?
-    [ "$module_status" != 2 ] || { echo 'Cannot inspect stock screensaver modules.' >&2; exit 1; }
+    [ "$module_status" != 2 ] || { say 'Cannot inspect stock screensaver modules.'; exit 1; }
 fi
 echo "$screensaver_loaded" >"$RUN_DIR/screensaver.loaded"
 
 # Freeze only the current stock volume daemon. It must not unmount USB
 # storage while Kobalt still maps its executable, Qt libraries and profile.
-volume_state=$(status volumd 2>&1) || { echo "$volume_state" >&2; exit 1; }
+volume_state=$(status volumd 2>&1) || { say "$volume_state"; exit 1; }
 case "$volume_state" in
     *'start/running, process '*) volume_pid=${volume_state##*process } ;;
-    *) echo "Refusing to launch: volumd is not running: $volume_state" >&2; exit 1 ;;
+    *) say "Refusing to launch: volumd is not running: $volume_state"; exit 1 ;;
 esac
-case "$volume_pid" in ''|*[!0-9]*) echo 'Invalid volumd PID.' >&2; exit 1 ;; esac
+case "$volume_pid" in ''|*[!0-9]*) say 'Invalid volumd PID.'; exit 1 ;; esac
 # Upstart still reports running when another reader has paused the process.
 # Refuse that state rather than taking ownership and later resuming its guard.
 volume_process_state=$(ps -o stat= -p "$volume_pid") || exit 1
 case "$volume_process_state" in
-    ''|*T*|*t*|*Z*|*X*) echo 'Refusing to launch: volumd is stopped or unavailable.' >&2; exit 1 ;;
+    ''|*T*|*t*|*Z*|*X*) say 'Refusing to launch: volumd is stopped or unavailable.'; exit 1 ;;
 esac
 echo "$volume_pid" >"$RUN_DIR/volume.pid"
 KOBALT_KINDLE_USB_NETWORK=$(lipc-get-prop -i -q com.lab126.volumd useUsbForNetwork) || KOBALT_KINDLE_USB_NETWORK=0
@@ -346,7 +359,7 @@ kill -STOP "$volume_pid" || exit 1
 
 log_memory 'before stock UI change'
 if [ "$UI_MODE" = pause ] && ! pause_supported; then
-    echo 'This firmware cannot pause the stock UI; stopping it instead.' >&2
+    say 'This firmware cannot pause the stock UI; stopping it instead.'
     UI_MODE=stop
 fi
 
@@ -354,12 +367,12 @@ if [ "$UI_MODE" = pause ]; then
     # Freeze exactly the window manager that is running now. Refuse one that
     # another reader already paused, as with volumd.
     awesome_pids=$(pidof awesome) || awesome_pids=
-    [ -n "$awesome_pids" ] || { echo 'Refusing to launch: awesome is not running.' >&2; exit 1; }
+    [ -n "$awesome_pids" ] || { say 'Refusing to launch: awesome is not running.'; exit 1; }
     for awesome_pid in $awesome_pids; do
-        case "$awesome_pid" in ''|*[!0-9]*) echo 'Invalid awesome PID.' >&2; exit 1 ;; esac
+        case "$awesome_pid" in ''|*[!0-9]*) say 'Invalid awesome PID.'; exit 1 ;; esac
         awesome_state=$(ps -o stat= -p "$awesome_pid") || exit 1
         case "$awesome_state" in
-            ''|*T*|*t*|*Z*|*X*) echo 'Refusing to launch: awesome is stopped or unavailable.' >&2; exit 1 ;;
+            ''|*T*|*t*|*Z*|*X*) say 'Refusing to launch: awesome is stopped or unavailable.'; exit 1 ;;
         esac
     done
     echo "$awesome_pids" >"$RUN_DIR/awesome.pid"
@@ -370,10 +383,10 @@ if [ "$UI_MODE" = pause ]; then
     fi
     # Record each cleanup obligation before its action, as with volumd.
     pillow_disabled=yes
-    bounded_stock 50 lipc-set-prop com.lab126.pillow disableEnablePillow disable || { echo 'Could not disable pillow; Kobalt was not started.' >&2; exit 1; }
+    bounded_stock 50 lipc-set-prop com.lab126.pillow disableEnablePillow disable || { say 'Could not disable pillow; Kobalt was not started.'; exit 1; }
     awesome_held=yes
     # shellcheck disable=SC2086
-    kill -STOP $awesome_pids || { echo 'Could not pause awesome; Kobalt was not started.' >&2; exit 1; }
+    kill -STOP $awesome_pids || { say 'Could not pause awesome; Kobalt was not started.'; exit 1; }
 else
     # Stopping the framework may signal the KUAL process tree. Ignore TERM until
     # ownership is recorded, as in the upstream Kindle framework-stop launch flow.
@@ -385,14 +398,14 @@ else
         usleep 1250000 || exit 1
     else
         trap terminate INT TERM
-        echo 'Could not stop lab126_gui; Kobalt was not started.' >&2
+        say 'Could not stop lab126_gui; Kobalt was not started.'
         exit 1
     fi
     trap terminate INT TERM
 fi
 
 if ! release_overlays; then
-    echo 'Could not release stock screen overlays; Kobalt was not started.' >&2
+    say 'Could not release stock screen overlays; Kobalt was not started.'
     exit 1
 fi
 
@@ -416,6 +429,6 @@ KOBALT_KINDLE_POWER_BRIDGE="$RUN_DIR/power-bridge" \
 child=$!
 wait "$child"
 exit_status=$?
-echo "Kobalt process exited (status $exit_status)." >&2
+say "Kobalt process exited (status $exit_status)."
 child=
 exit "$exit_status"

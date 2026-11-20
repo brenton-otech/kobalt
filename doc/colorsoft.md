@@ -131,7 +131,7 @@ The description includes the unofficial build label. The hooks are in
   writes `data/` (settings and reading progress) or `logs/`. It records the
   installed files in `/mnt/us/kobalt/kpm-installed.txt` and removes files
   that only an earlier package installed. It copies the `Kobalt.sh`
-  and `Kobalt-pause.sh` scriptlets to `documents/`.
+  and `Kobalt-stop.sh` scriptlets to `documents/`.
 - `uninstall.sh upgrade`, which KPM runs before an upgrade, keeps the app.
   A full uninstall removes only the recorded files, the directories they
   leave empty and each unchanged scriptlet. `data/`, `logs/` and any other
@@ -235,15 +235,15 @@ On a Mac, the Colorsoft's USB storage is reached over MTP, for example with
 
    Eject the Kindle, unplug it and open that scriptlet in the Library.
    KPM shows its log on screen. The install hook ends with
-   `Kobalt installed. Open "Kobalt" in the Library to start it, or "Kobalt (pause stock UI)" to keep the stock UI paused.`
+   `Kobalt installed. Open "Kobalt" in the Library to start it, or "Kobalt (stop stock UI)" to stop the stock UI instead of pausing it.`
 3. Open **Kobalt** in the Library. It is the `documents/Kobalt.sh`
-   scriptlet, and it runs `kpm launch kobalt`, which stops the stock
-   interface while Kobalt runs. **Kobalt (pause stock UI)**
-   (`documents/Kobalt-pause.sh`) runs `kpm launch kobalt --pause-ui` instead,
-   so Home returns almost at once on exit. See
+   scriptlet, and it runs `kpm launch kobalt`, which pauses the stock
+   interface while Kobalt runs, so Home returns almost at once on exit.
+   **Kobalt (stop stock UI)** (`documents/Kobalt-stop.sh`) runs
+   `kpm launch kobalt --stop-ui` instead, as a fallback. See
    [Stock UI modes](kindle-maintenance.md#stock-ui-modes).
 4. To leave, close any open book with the Library arrow. Then choose **Exit
-   Kobalt** from the Library's three-dot menu. The stock interface restarts.
+   Kobalt** from the Library's three-dot menu. The stock interface returns.
 5. The installed package file is no longer needed. Delete
    `Kobalt-1.0-beta.9-kindle-colorsoft-r1.kpkg` with OpenMTP if you want the
    space back.
@@ -281,7 +281,7 @@ The device must be jailbroken with KUAL (or KUALA) installed.
 3. Eject the Kindle. Open KUAL, then choose **Kobalt prototype → Start
    Kobalt prototype**.
 4. To leave, close any open book with the Library arrow. Then choose **Exit
-   Kobalt** from the Library's three-dot menu. The stock interface restarts.
+   Kobalt** from the Library's three-dot menu. The stock interface returns.
 
 Over SSH, the same steps are: copy the ZIP to `/mnt/us/`, then run
 `unzip -o /mnt/us/Kobalt-1.0-beta.9-kindle-colorsoft-r1.zip -d /mnt/us/`.

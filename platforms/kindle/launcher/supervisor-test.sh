@@ -17,6 +17,8 @@ trap 'kill -CONT "$KINDLE_TEST_AWESOME_PID" 2>/dev/null || :; kill -TERM "$KINDL
 mkdir -p "$TEST_DIR/tools" "$TEST_DIR/app/bin" "$TEST_DIR/app/logs" "$TEST_DIR/app/launcher"
 echo colorsoft >"$TEST_DIR/app/launcher/runtime-target"
 export KINDLE_TEST_ROOT="$TEST_DIR"
+# Bound the wait for an active stock application in these checks.
+export KOBALT_KINDLE_HOME_WAIT=40
 storage_check=$(dirname "$SUPERVISOR")/check-storage.sh
 printf 'root / ext4 rw 0 0\nfsp /mnt/us fuse.fsp rw,noexec 0 0\n' >"$TEST_DIR/mounts"
 if sh "$storage_check" /mnt/us/kobalt "$TEST_DIR/mounts"; then
@@ -83,6 +85,18 @@ cat >"$TEST_DIR/tools/lipc-get-prop" <<'EOF'
 set -eu
 # Colorsoft's framework flag may stay zero until Home is activated.
 if [ "$4" = frameworkStarted ]; then echo 0; exit 0; fi
+# A restarted Colorsoft framework shows no application until Home is
+# requested; other targets open Home themselves.
+if [ "$4" = activeApp ]; then
+    [ "${KINDLE_TEST_NO_ACTIVE_APP:-0}" = 0 ] || { echo; exit 0; }
+    if [ "$(cat "$KINDLE_TEST_ROOT/app/launcher/runtime-target")" = colorsoft ] &&
+        [ ! -s "$KINDLE_TEST_ROOT/home-actions" ]; then
+        echo
+    else
+        echo com.lab126.booklet.home
+    fi
+    exit 0
+fi
 [ "$4" = load ] || { echo 1; exit 0; }
 if [ -f "$KINDLE_TEST_ROOT/pending-module" ]; then
     [ "${KINDLE_TEST_SCREEN_QUERY_FAIL:-0}" = 0 ] || exit 1
@@ -205,14 +219,26 @@ for failure in KINDLE_TEST_HOME_FAIL; do
     [ "$result" = 0 ]
     [ -f "$TEST_DIR/run/supervisor.sh" ]
     [ ! -s "$TEST_DIR/home-actions" ]
-    grep -q 'Could not activate Kindle Home.' "$TEST_DIR/app/logs/launcher.log"
+    grep -q 'No stock Kindle application became active.' "$TEST_DIR/app/logs/launcher.log"
+    grep -q 'Could not confirm an active Kindle Home.' "$TEST_DIR/app/logs/launcher.log"
     rm -rf "$TEST_DIR/run"
     unset "$failure"
 done
-# Other Kindle targets keep their existing handoff.
+# Other Kindle targets open Home themselves; recovery still waits for it.
 echo pw3 >"$TEST_DIR/app/launcher/runtime-target"
 run_case
 [ "$result" = 0 ] && [ ! -e "$TEST_DIR/run" ] && [ ! -s "$TEST_DIR/home-actions" ]
+grep -q 'Stock Kindle application active: com.lab126.booklet.home' "$TEST_DIR/app/logs/launcher.log"
+# Supervisor lines carry UTC timestamps.
+grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z Kobalt supervisor started: target pw3, stock UI stop[.]$' "$TEST_DIR/app/logs/launcher.log"
+# A restarted framework without an active application keeps the recovery state.
+export KINDLE_TEST_NO_ACTIVE_APP=1
+: >"$TEST_DIR/app/logs/launcher.log"
+run_case
+[ "$result" = 0 ] && [ -f "$TEST_DIR/run/supervisor.sh" ]
+grep -q 'No stock Kindle application became active.' "$TEST_DIR/app/logs/launcher.log"
+rm -rf "$TEST_DIR/run"
+unset KINDLE_TEST_NO_ACTIVE_APP
 echo colorsoft >"$TEST_DIR/app/launcher/runtime-target"
 # Both overlays must finish their asynchronous unload before app startup.
 export KINDLE_TEST_MODULES='splash screensaver langpicker blankwindow' KINDLE_TEST_SCREEN_UNLOAD_DELAY=2

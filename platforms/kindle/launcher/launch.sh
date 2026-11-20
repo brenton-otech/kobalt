@@ -4,13 +4,22 @@
 set -eu
 # --pause-ui freezes the stock interface while Kobalt runs, as KOReader does,
 # so Home returns almost at once. --stop-ui shuts it down and cold-boots it on
-# exit. Without a flag the packaged default applies.
-UI_MODE=stop
+# exit. Without a flag the packaged target's default applies.
+UI_MODE=
 case "${1:-}" in
     --pause-ui) UI_MODE=pause; shift ;;
     --stop-ui) UI_MODE=stop; shift ;;
 esac
 APP_DIR=$(CDPATH='' cd "$(dirname "$0")/.." && pwd -P)
+if [ -z "$UI_MODE" ]; then
+    # The Colorsoft pauses by default: a cold-restarted framework on firmware
+    # 5.20 can come back without a usable Home. PW3 and PW5 keep stop, which
+    # frees the stock UI's memory on the smaller devices.
+    case "$(cat "$APP_DIR/launcher/runtime-target" 2>/dev/null)" in
+        colorsoft) UI_MODE=pause ;;
+        *) UI_MODE=stop ;;
+    esac
+fi
 if [ "$(uname -s)" != Linux ]; then
     echo 'Kobalt Kindle requires Kindle Linux.' >&2
     exit 1

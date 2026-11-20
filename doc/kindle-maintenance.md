@@ -76,18 +76,32 @@ artifacts from the current output for new installations.
 
 ## Stock UI modes
 
-The launcher either stops the stock framework (`--stop-ui`, the default) or
-pauses it (`--pause-ui`), as KOReader does by default. Every target uses the
-same `launcher/launch.sh` and `launcher/supervisor.sh`. KUAL offers both modes
-in its Kobalt menu. The Colorsoft KPM package installs two Library entries:
-**Kobalt** starts in stop mode, and **Kobalt (pause stock UI)** runs
-`kpm launch kobalt --pause-ui`. KPM passes that flag to the package's launch
-hook, which hands it to the shared launcher. The Colorsoft ZIP carries the same
-two Library scriptlets for firmware without KUAL.
+The launcher either stops the stock framework (`--stop-ui`) or pauses it
+(`--pause-ui`), as KOReader does by default. Every target uses the same
+`launcher/launch.sh` and `launcher/supervisor.sh`. Without a flag, the default
+comes from the packaged `launcher/runtime-target`: the Colorsoft pauses, and
+PW3 and PW5 stop, which frees the stock UI's memory on those devices. KUAL
+offers the default and both explicit modes in its Kobalt menu. The Colorsoft
+KPM package installs two Library entries: **Kobalt** starts with the default
+pause, and **Kobalt (stop stock UI)** runs `kpm launch kobalt --stop-ui` as a
+fallback. KPM passes that flag to the package's launch hook, which hands it to
+the shared launcher. The Colorsoft ZIP carries the same two Library scriptlets
+for firmware without KUAL.
+
+The Colorsoft default changed after a stop-mode exit on firmware 5.20.1 left a
+white screen on wake: the restarted framework reported the Home request as
+accepted, but no Home appeared, and recovery still reported success. A stopped
+run now waits, on every target, until `lipc-get-prop com.lab126.appmgrd
+activeApp` names a stock booklet. On the Colorsoft it repeats the Home request
+every ten seconds while it waits. `KOBALT_KINDLE_HOME_WAIT` bounds the wait in
+seconds (600 by default). If no application becomes active, the supervisor logs
+that and keeps its recovery directory; a restart of the Kindle recovers. All
+three firmware fixtures provide `activeApp` in `libappmgr`. Supervisor lines in
+`kobalt/logs/launcher.log` start with a UTC timestamp, including the
+`memory` lines; the reader's own output and power events are not timestamped.
 
 Stopping runs `stop lab126_gui` and restarts it on exit; on a PW3 the stock UI
-then cold-boots for minutes, and on the Colorsoft the supervisor also asks
-`appmgrd` for Home until it accepts. Pausing needs firmware 5.7.2 or newer,
+then cold-boots for minutes. Pausing needs firmware 5.7.2 or newer,
 read from `/etc/prettyversion.txt`; older or unreadable firmware falls back to
 stopping and says so in the launcher log. It saves the framebuffer, disables
 pillow (`com.lab126.pillow disableEnablePillow`) and freezes the running
