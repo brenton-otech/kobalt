@@ -160,6 +160,7 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
         auto *reader = controller.window();
         canvas->setContent(reader);
         stack->setCurrentWidget(canvas);
+        start->releaseOpening();
         sizeCanvas();
         reader->show();
         reader->checkpoint();
