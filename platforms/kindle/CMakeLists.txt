@@ -32,6 +32,8 @@ endforeach()
 # Kindle SDK supplies Qt, zlib and OpenSSL; the pinned libpng is built there.
 include("${KOBALT_ROOT}/dependencies/cache.cmake")
 kobalt_dependencies()
+include("${KOBALT_ROOT}/dependencies/local-engine.cmake")
+kobalt_local_engine()
 add_subdirectory("${KOBALT_ROOT}/assets" "${CMAKE_CURRENT_BINARY_DIR}/assets")
 
 file(READ "${KOBALT_ASSETS}/manifest.json" assets)
@@ -56,6 +58,10 @@ include("${KOBALT_ROOT}/platforms/shared-inputs.cmake")
 file(GLOB_RECURSE shared CONFIGURE_DEPENDS "${source}/*.cpp" "${source}/*.h")
 # The scenario player is built only into evaluation builds.
 list(FILTER shared EXCLUDE REGEX "/src/scenario/")
+# Blaze builds as its own project; only its adapter belongs to the application.
+list(FILTER shared EXCLUDE REGEX "/src/engine/blaze/")
+file(GLOB_RECURSE engine_adapter CONFIGURE_DEPENDS "${source}/engine/blaze/adapter/*.cpp" "${source}/engine/blaze/adapter/*.h")
+list(APPEND shared ${engine_adapter})
 set(adapters main.cpp window.cpp window.h services.cpp services.h display.cpp device.cpp device.h properties.cpp properties.h
     folder_browser.cpp folder_browser.h folder_picker_checks.cpp folder_picker_checks.h)
 list(TRANSFORM adapters PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
@@ -80,10 +86,12 @@ else()
             --redefine-sym FT_Render_Glyph=kobalt_font_render_glyph "${CRENGINE_BUILD}/libcrengine.a" "${engine}"
         DEPENDS "${CRENGINE_BUILD}/libcrengine.a" VERBATIM)
     add_custom_target(kindle-engine DEPENDS "${engine}")
+    add_dependencies(kindle-engine kobalt-local-engine)
     add_dependencies(kobalt_kindle kindle-engine)
     target_link_options(kobalt_kindle PRIVATE -Wl,--no-undefined -Wl,--exclude-libs,ALL
         "LINKER:--whole-archive,${prefix}/lib/libfreetype.a,--no-whole-archive")
 endif()
+add_dependencies(kobalt_kindle kobalt-local-engine)
 target_link_libraries(kobalt_kindle PRIVATE Qt6::Widgets Qt6::Network Qt6::Sensors Qt6::Sql "${engine}"
     "${prefix}/lib/libharfbuzz.a" "${prefix}/lib/libxxhash.a" "${prefix}/lib/libutf8proc.a"
     "${prefix}/lib/libjpeg.a" "${prefix}/lib/liblunasvg.a" "${prefix}/lib/libfreetype.a"
