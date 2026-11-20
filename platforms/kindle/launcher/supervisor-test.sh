@@ -62,6 +62,7 @@ cat >"$TEST_DIR/app/bin/kobalt" <<'EOF'
 #!/bin/sh
 case "$(ps -o stat= -p "$KINDLE_TEST_VOLUME_PID")" in *T*) ;; *) exit 99 ;; esac
 [ "$(pwd)" = / ] || exit 98
+[ "${KOBALT_KINDLE_FRAMEWORK_RUNNING:-}" = 0 ] || { echo 'Stopped framework reported as running.' >&2; exit 89; }
 case "${LD_LIBRARY_PATH:-}" in "$KINDLE_TEST_ROOT/app/lib"*) ;; *) exit 96 ;; esac
 if grep -Eq '(^| )(splash|screensaver)( |$)' "$KINDLE_TEST_ROOT/modules"; then
     echo 'Reader started before stock overlays were released.' >&2
@@ -220,6 +221,7 @@ cat >"$TEST_DIR/app/bin/kobalt" <<'EOF'
 case "$(ps -o stat= -p "$KINDLE_TEST_VOLUME_PID")" in *T*) ;; *) exit 99 ;; esac
 case "$(ps -o stat= -p "$KINDLE_TEST_AWESOME_PID")" in *T*) ;; *) echo 'Reader started with a live window manager.' >&2; exit 92 ;; esac
 [ ! -s "$KINDLE_TEST_ROOT/actions" ] || { echo 'Pause mode stopped the framework.' >&2; exit 91; }
+[ "${KOBALT_KINDLE_FRAMEWORK_RUNNING:-}" = 1 ] || { echo 'Power helper was not told the framework is running.' >&2; exit 90; }
 echo app >>"$KINDLE_TEST_ROOT/actions"
 printf 'reader frame' >"$KOBALT_KINDLE_FB_DEVICE"
 exit "${KINDLE_TEST_APP_EXIT:-0}"
@@ -286,6 +288,7 @@ unset KINDLE_TEST_PILLOW_ENABLE_FAIL
 # Firmware older than 5.7.2, or an unreadable version, uses the stop path.
 cat >"$TEST_DIR/app/bin/kobalt" <<'EOF'
 #!/bin/sh
+[ "${KOBALT_KINDLE_FRAMEWORK_RUNNING:-}" = 0 ] || { echo 'Fallback stop reported a running framework.' >&2; exit 88; }
 echo app >>"$KINDLE_TEST_ROOT/actions"
 exit "${KINDLE_TEST_APP_EXIT:-0}"
 EOF

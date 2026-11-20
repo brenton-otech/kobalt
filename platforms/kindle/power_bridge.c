@@ -5,6 +5,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
 #include <unistd.h>
@@ -78,14 +79,30 @@ int main(void) {
     int (*LipcSubscribeExt)(Lipc *, const char *, const char *, EventCallback, void *);
     int (*LipcSetIntProperty)(Lipc *, const char *, const char *, int);
     LOAD(LipcOpenEx); LOAD(LipcClose); LOAD(LipcRegisterIntProperty); LOAD(LipcSubscribeExt); LOAD(LipcSetIntProperty);
+    /* Paused stock UI: the running framework already owns com.lab126.kaf and
+       publishes frameworkStarted. Claiming that name fails with error 17, so
+       listen through an anonymous client and leave the framework's state alone. */
+    const char *framework_running = getenv("KOBALT_KINDLE_FRAMEWORK_RUNNING");
+    const int shared = framework_running && !strcmp(framework_running, "1");
     int error = 0;
-    Lipc *handle = LipcOpenEx("com.lab126.kaf", &error);
-    if (!handle) { fprintf(stderr, "Cannot own framework service: %d\n", error); return 1; }
+    Lipc *handle = NULL;
+    if (shared) {
+        Lipc *(*LipcOpenNoName)(void);
+        *(void **)(&LipcOpenNoName) = dlsym(library, "LipcOpenNoName");
+        if (LipcOpenNoName) handle = LipcOpenNoName();
+        if (!handle) handle = LipcOpenEx("com.lab126.kobalt.power", &error);
+        if (!handle) { fprintf(stderr, "Cannot open power client beside the framework: %d\n", error); return 1; }
+    } else {
+        handle = LipcOpenEx("com.lab126.kaf", &error);
+        if (!handle) { fprintf(stderr, "Cannot own framework service: %d\n", error); return 1; }
+    }
     int result = 1;
-    error = LipcRegisterIntProperty(handle, "frameworkStarted", framework_started, NULL, NULL);
-    if (error != 0) {
-        fprintf(stderr, "Cannot publish framework state: %d\n", error);
-        goto done;
+    if (!shared) {
+        error = LipcRegisterIntProperty(handle, "frameworkStarted", framework_started, NULL, NULL);
+        if (error != 0) {
+            fprintf(stderr, "Cannot publish framework state: %d\n", error);
+            goto done;
+        }
     }
     static const struct { const char *source, *name; } events[] = {
         {"com.lab126.powerd", "goingToScreenSaver"},

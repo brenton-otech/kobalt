@@ -30,6 +30,12 @@ void *LipcOpenEx(const char *name, int *error) {
     if (pthread_create(&worker, NULL, events, NULL)) return NULL;
     return (void *)1;
 }
+void *LipcOpenNoName(void) {
+    if (getenv("FAKE_NO_ANONYMOUS_CLIENT")) return NULL;
+    fprintf(stderr, "anonymous-client\n");
+    if (pthread_create(&worker, NULL, events, NULL)) return NULL;
+    return (void *)1;
+}
 void LipcClose(void *handle) {
     (void)handle;
     atomic_store(&closed, 1);
@@ -38,6 +44,7 @@ void LipcClose(void *handle) {
 }
 int LipcRegisterIntProperty(void *handle, const char *name, PropertyCallback get, PropertyCallback set, void *data) {
     int value = 0;
+    fprintf(stderr, "registered:%s\n", name);
     if (getenv("FAKE_REGISTER_FAIL")) return 1;
     return strcmp(name, "frameworkStarted") || set || !get || get(handle, name, &value, data) || value != 1;
 }
