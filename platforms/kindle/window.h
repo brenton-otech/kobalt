@@ -24,7 +24,7 @@ public:
     Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder, QString libraryRoot,
            QString folderStorageRoot = QStringLiteral("/mnt/us"));
     ~Window() override;
-    void openBook(const QString &path);
+    void openBook(const QString &path, const QString &position = {});
     void closeBook();
 
     ReaderWindow *readerWindow() const { return controller.window(); }
@@ -60,7 +60,7 @@ private:
     std::shared_ptr<Device> device;
     standalone::ReaderController controller;
     library::Store store;
-    QString openedKey, libraryRoot, pendingOpen;
+    QString openedKey, libraryRoot, pendingOpen, pendingPosition;
     QStackedWidget *stack;
     standalone::StartScreen *start;
     FolderBrowser *folderBrowser;

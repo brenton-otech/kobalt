@@ -124,11 +124,11 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
             windowHandle()->setProperty("kobalt.pageTurnDirection", direction);
         }
     };
-    connect(start, &standalone::StartScreen::bookRequested, this, &Window::openBook);
+    connect(start, &standalone::StartScreen::bookRequested, this,
+            [this](const QString &path) { openBook(path); });
     connect(start, &standalone::StartScreen::passageRequested, this,
             [this](const QString &key, const QString &position) {
-                controller.setStartPosition(position);
-                openBook(key);
+                openBook(key, position);
             });
     connect(start, &standalone::StartScreen::exitRequested, this, &Window::closeBook);
     folderBrowser = new FolderBrowser(folderStorageRoot, this);
@@ -139,7 +139,8 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     };
     libraryView->chooseFolder = [this](const QString &path) { folderBrowser->select(path); };
     libraryView->chooseBook = [this](const QString &path) { folderBrowser->selectBook(path); };
-    connect(folderBrowser, &FolderBrowser::bookSelected, this, &Window::openBook);
+    connect(folderBrowser, &FolderBrowser::bookSelected, this,
+            [this](const QString &path) { openBook(path); });
     connect(folderBrowser, &FolderBrowser::loading, this,
             [this](const QString &path) { start->library()->setFolderPickerLoading(path); });
     connect(folderBrowser, &FolderBrowser::listed, this,
@@ -227,7 +228,7 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     });
     connect(device.get(), &Device::initializedChanged, this, [this] {
         if (!pendingOpen.isEmpty())
-            openBook(std::exchange(pendingOpen, {}));
+            openBook(std::exchange(pendingOpen, {}), std::exchange(pendingPosition, {}));
         if (device->initialized()) {
             platform::pageRefresh(this, true);
             update();
@@ -392,12 +393,13 @@ void Window::recordProgress()
     store.save();
 }
 
-void Window::openBook(const QString &path)
+void Window::openBook(const QString &path, const QString &position)
 {
     if (closing || !controller.idle())
         return;
     if (!device->initialized()) {
         pendingOpen = path;
+        pendingPosition = position;
         start->showOpening();
         return;
     }
@@ -413,7 +415,7 @@ void Window::openBook(const QString &path)
     stack->setCurrentWidget(start);
     // Use the allocated reading area before the hidden canvas is first shown.
     layout()->activate();
-    controller.open(absolute, readerPixels());
+    controller.open(absolute, readerPixels(), {}, false, position);
 }
 
 void Window::closeBook()
