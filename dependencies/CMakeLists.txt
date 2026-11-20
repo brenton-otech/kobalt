@@ -154,6 +154,7 @@ else()
         "Name: libpng\nDescription: libpng from the SDK\nVersion: ${KOBALT_PNG_VERSION}\nLibs: ${png} -lz\nCflags: -I${png_include}\n" @ONLY)
 endif()
 if(KOBALT_KINDLE)
+    # The standalone SDK keeps zlib outside the compiler's default sysroot.
     file(CONFIGURE OUTPUT "${prefix}/lib/pkgconfig/zlib.pc" CONTENT
         "Name: zlib\nDescription: SDK zlib\nVersion: ${ZLIB_VERSION_STRING}\nLibs: ${ZLIB_LIBRARY}\nCflags: -I${ZLIB_INCLUDE_DIR}\n" @ONLY)
 else()

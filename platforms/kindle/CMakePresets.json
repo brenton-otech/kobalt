@@ -19,6 +19,8 @@
       "binaryDir": "${sourceDir}/../../build/kindle-pw3",
       "cacheVariables": {
         "KOBALT_KINDLE_TARGET": "pw3",
+        "CMAKE_C_FLAGS": "-I/sdk/runtime/include",
+        "CMAKE_CXX_FLAGS": "-I/sdk/runtime/include",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/../../build/kindle-pw3/package/kobalt"
       }
     },
