@@ -1,13 +1,12 @@
 # Unofficial Kindle builds
 
-The current Colorsoft development port tracks upstream main at
-`679175046d8c806ea3b404525180fbc29a26fcd2` (November 12, 2026), as explicitly
-requested for this build. Its platform base is the beta.7 port; the queued stock airplane-mode command
-and the Library scriptlet are carried
-forward from the previous Colorsoft branch at `050b5b2e`. Only Colorsoft is being
-built and validated in this worktree. Revision 2 distinguishes this candidate
-from the earlier beta.7 Colorsoft package. Build metadata records the exact
-upstream main revision and the upstream asset version, currently beta.8.
+The current Colorsoft port tracks the upstream `v1.0-beta.9` release tag,
+commit `be47258850ffdc3295257475afdf8b8f6cb53176`. It merges that tag into the
+beta.8 Colorsoft port (`28c4b4eb`), which carried the queued stock airplane-mode
+command and the Library scriptlet forward from the previous Colorsoft branch at
+`050b5b2e`. Only Colorsoft is built and validated on this branch. Build metadata
+records the exact upstream revision and the upstream asset version, currently
+beta.9.
 
 The original port starts at Nico Verbruggen's `v1.0-beta.7` tag, commit
 `e86533c80e8aa41bfc7d79c9e445cbd4a6405039`. The original Kindle implementation
@@ -318,3 +317,40 @@ reading data was removed, and no live SQLite connection was opened externally.
 Deployment logs, the package manifest and matching before/after profile checksums
 are retained under `build/deployment/`. Physical reading, color, sleep/wake and
 return-to-Home behavior were not exercised during this installation.
+
+## Colorsoft beta.9 revision 1 candidate validation
+
+`v1.0-beta.9` was merged into the beta.8 port. Beta 9 builds the reader engine
+from `src/engine/blaze` with `dependencies/local-engine.cmake`, replaced
+`ReaderController::setStartPosition` with a position argument to `open`, and
+widened the keyboard factory to any editor widget; the Kindle project follows
+all three. The opening-surface release and the engine header move were taken
+from the PW3 beta 9 port (`fm/kobalt-pw3-beta9`).
+
+The SDK image `localhost/kobuild:kindle` was rebuilt from kobuild
+`fm/kindle-hf-sdk` (`c5bc783`) on an Intel Mac, where the amd64 SDK runs
+natively; its own SDK checks passed. `bash platforms/kindle/build.sh colorsoft`
+produced `Kobalt-1.0-beta.9-kindle-colorsoft-r1.kpkg` (KPM version
+`[1, 0, 209001]`) and the matching ZIP. With the adapter targets built,
+`KOBALT_KINDLE_VERIFY_ADAPTERS=1 bash platforms/kindle/verify-package.sh colorsoft`
+passed the KPM hook checks, the ARM ELF audit, the power-bridge checks, the
+display, refresh-queue, touch and device IPC regressions against the stock
+5.20.1 userspace, the package-to-stage comparison, the folder and book pickers,
+the wireless controls and the strict Type Tester smoke. The build-identity,
+audit-parser, supervisor, runtime-preflight and KPM-hook shell checks passed in
+the pinned Linux image.
+
+On Docker Desktop for Mac, the Kindle scripts set their own `DOCKER_CONFIG`,
+which drops the active Docker Desktop context. Run them with
+`DOCKER_HOST=unix://$HOME/.docker/run/docker.sock`.
+
+There was no native Qt SDK on that Mac, so the native suite was built and run
+in the pinned kobuild Linux image with representative variants. The worktree's
+Git directory was mapped into the container for source information, and test
+scratch was kept on the container filesystem because the bind mount does not
+enforce read-only permissions. The beta.8 port's
+`airplaneModeFollowsReportedRadio` check had never been registered with CTest;
+it is now registered in the settings area and opens Settings first, because
+beta 9 builds Settings on first open. The battery alignment check now expects
+a blank indicator for an unknown charge, which the Kindle port hides. Physical
+color, touch, sleep and stock-UI recovery still require device testing.

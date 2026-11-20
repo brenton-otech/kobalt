@@ -8,13 +8,13 @@ detects the color framebuffer at runtime.
 The PW3 softfp toolchain does not apply. Besides the KUAL ZIP, the target
 produces a KPM package for the Véra jailbreak, which has no KUAL.
 
-The current beta.7 revision 1 packages and engineering results are recorded in
-[Kindle maintenance](kindle-maintenance.md#colorsoft-gen-1-beta7-engineering-result).
-That build includes the folder and EPUB pickers, the embedded Library icon and
-the Colorsoft Home recovery fix. It passed the hard-float package, adapter and
-stock-runtime reader checks. The powered-off device has not received this build;
-physical color, input, sleep and exit checks remain pending. Dated prototype
-results below describe earlier packages.
+The current beta.9 revision 1 packages and their validation are recorded in
+[Kindle maintenance](kindle-maintenance.md#colorsoft-beta9-revision-1-candidate-validation).
+That build includes the folder and EPUB pickers, the embedded Library icon,
+the airplane-mode entry and the Colorsoft Home recovery fix. It passed the
+hard-float package, adapter and stock-runtime reader checks. Physical color,
+input, sleep and exit checks remain pending. Dated prototype results below
+describe earlier packages.
 
 ## Build contract
 
@@ -95,8 +95,8 @@ The output stays under `build/kindle-colorsoft/` and the firmware fixture under
 `build/kindle-colorsoft-sdk/`. The build writes two packages with the same
 app files:
 
-- `build/kindle-colorsoft/Kobalt-1.0-beta.7-kindle-colorsoft-r1.kpkg` for KPM
-- `build/kindle-colorsoft/Kobalt-1.0-beta.7-kindle-colorsoft-r1.zip` for KUAL
+- `build/kindle-colorsoft/Kobalt-1.0-beta.9-kindle-colorsoft-r1.kpkg` for KPM
+- `build/kindle-colorsoft/Kobalt-1.0-beta.9-kindle-colorsoft-r1.zip` for KUAL
   or a manual install
 
 PW5 and PW3 keep their own commands, outputs, ZIP packages, fixtures and
@@ -120,7 +120,7 @@ in `/mnt/us/kobalt`, which is where the ZIP puts it.
 `kpm-helper.py`, so the build gains no Python step. The result matches the
 helper's output: a gzip tar with `manifest.json` first. The manifest has
 `manifest_version` 2, ID `kobalt`, and `supported_platforms` set to
-`kindlehf`. Beta.7 revision 1 uses `[1, 0, 207001]`, encoding the upstream
+`kindlehf`. Beta.9 revision 1 uses `[1, 0, 209001]`, encoding the upstream
 prerelease and local revision instead of dropping the beta suffix. KPM stores
 these components as [unsigned integers](https://github.com/KindleModding/KPM/blob/4800e09/src/include/kpm/semver.h).
 The description includes the unofficial build label. The hooks are in
@@ -217,14 +217,14 @@ On a Mac, the Colorsoft's USB storage is reached over MTP, for example with
 `/mnt/us` on the device.
 
 1. Connect the Colorsoft to the Mac and open OpenMTP. Copy
-   `Kobalt-1.0-beta.7-kindle-colorsoft-r1.kpkg` to the top level of the Kindle
+   `Kobalt-1.0-beta.9-kindle-colorsoft-r1.kpkg` to the top level of the Kindle
    storage, beside `documents/`. Copy DRM-free EPUB files to `documents/`.
    The default library scans that folder recursively.
 2. Eject the Kindle in OpenMTP and unplug it. On the Home screen, tap the
    search bar and enter:
 
    ```text
-   ;kpm install file:///mnt/us/Kobalt-1.0-beta.7-kindle-colorsoft-r1.kpkg
+   ;kpm install file:///mnt/us/Kobalt-1.0-beta.9-kindle-colorsoft-r1.kpkg
    ```
 
    KPM shows its log on screen. The install hook ends with
@@ -234,7 +234,7 @@ On a Mac, the Colorsoft's USB storage is reached over MTP, for example with
 4. To leave, close any open book with the Library arrow. Then choose **Exit
    Kobalt** from the Library's three-dot menu. The stock interface restarts.
 5. The installed package file is no longer needed. Delete
-   `Kobalt-1.0-beta.7-kindle-colorsoft-r1.kpkg` with OpenMTP if you want the
+   `Kobalt-1.0-beta.9-kindle-colorsoft-r1.kpkg` with OpenMTP if you want the
    space back.
 
 To update, copy the new `.kpkg` the same way, then enter
@@ -252,7 +252,7 @@ unchanged scriptlet. It keeps `kobalt/data/`, `kobalt/logs/` and any other
 file in `kobalt/`. Delete that folder with OpenMTP to remove everything.
 
 If the search bar does not accept the command, run the same steps over SSH:
-`/var/local/kmc/bin/kpm -y install file:///mnt/us/Kobalt-1.0-beta.7-kindle-colorsoft-r1.kpkg`.
+`/var/local/kmc/bin/kpm -y install file:///mnt/us/Kobalt-1.0-beta.9-kindle-colorsoft-r1.kpkg`.
 A one-line scriptlet that runs that command from `documents/` also works.
 
 ### With KUAL
@@ -260,7 +260,7 @@ A one-line scriptlet that runs that command from `documents/` also works.
 The device must be jailbroken with KUAL (or KUALA) installed.
 
 1. Connect the Kindle over USB. Extract
-   `Kobalt-1.0-beta.7-kindle-colorsoft-r1.zip` at the Kindle USB root. This
+   `Kobalt-1.0-beta.9-kindle-colorsoft-r1.zip` at the Kindle USB root. This
    creates or updates `kobalt/` and `extensions/kobalt/`. When updating,
    keep the existing `kobalt/data/`, which holds settings and reading
    progress.
@@ -272,7 +272,7 @@ The device must be jailbroken with KUAL (or KUALA) installed.
    Kobalt** from the Library's three-dot menu. The stock interface restarts.
 
 Over SSH, the same steps are: copy the ZIP to `/mnt/us/`, then run
-`unzip -o /mnt/us/Kobalt-1.0-beta.7-kindle-colorsoft-r1.zip -d /mnt/us/`.
+`unzip -o /mnt/us/Kobalt-1.0-beta.9-kindle-colorsoft-r1.zip -d /mnt/us/`.
 Use one install method at a time. KPM uninstall removes only the files its
 own install recorded.
 
