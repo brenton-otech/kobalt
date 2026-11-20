@@ -40,6 +40,10 @@ public:
 
     bool connected() const { return connected_; }
 
+    // Request Nickel's ordinary local-library scan after native initialization.
+    // The completion is consumed once, when doneProcessing is emitted.
+    bool scanLibrary(std::function<void()> done);
+
     bool blocked() const
     {
         return asleep || usbPending || exported || poweringOff || removalPending;
@@ -61,9 +65,11 @@ public:
     std::function<bool()> openingWorkPending;
     static void finishSleepView();
     std::function<void(std::function<void()>)> prepareUsb;
+    std::function<void()> storageReleased, storageRestored;
     std::function<void(std::function<void()>)> prepareShutdown;
     // False keeps the device awake while pending reader saves are started.
     std::function<bool()> beforeStandby;
+    std::function<void()> afterStandby;
     std::function<bool()> readerInputActive;
     static bool protectStandbyInput();
     static void disconnected();
@@ -91,6 +97,7 @@ private slots:
     void unplugging();
 
 private:
+    std::function<void()> scanDone;
     bool eventFilter(QObject *object, QEvent *event) override;
     void checkSleepView(const char *source);
     void queueSleepViewCheck();

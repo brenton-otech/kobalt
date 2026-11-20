@@ -34,6 +34,7 @@
 #include "platforms/kobo/display/navigation_refresh.h"
 #include "app/reader/settings/header_footer_panel.h"
 #include "app/reader/panels/bookmark_list.h"
+#include "app/reader/panels/note_editor.h"
 #include "platforms/standalone/canvas.h"
 #include "platforms/android/canvas_refresh.h"
 #include "platforms/android/boox_refresh.h"
@@ -45,7 +46,7 @@
 #include "support/host_presentation.h"
 #include "support/reader_inputs.h"
 #include "support/strings.h"
-#include "engine/crengine/engine_document.h"
+#include "engine/blaze/adapter/engine_document.h"
 #include <QApplication>
 #include <QtGui/private/qeventpoint_p.h>
 #include <QFontDatabase>
@@ -3197,6 +3198,40 @@ private slots:
         }
     }
 
+    void noteEditorPassageLines()
+    {
+        ui::setDensity(300);
+        QWidget host;
+        host.resize(1072, 1448);
+        host.show();
+        QFont font = ui::interfaceFont();
+        font.setPixelSize(ui::metrics::search::excerptText);
+        const auto lineCount = [&](const QString &text) {
+            // The previous editor's card is deleted later; let it go first.
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+            NoteEditor editor(&host, {}, QStringLiteral("Add note"),
+                              { text, QStringLiteral("Prologue"), QStringLiteral("shaded"),
+                                QStringLiteral("yellow"), font },
+                              QString());
+            QCoreApplication::processEvents();
+            auto *quote = host.findChild<QLabel *>("rrNoteQuote");
+            auto *box = host.findChild<QWidget *>("rrNoteText");
+            if (!quote || !box)
+                return -1;
+            const int pitch = qMax(int(ui::px(44)), QFontMetrics(quote->font()).lineSpacing());
+            // The passage ends before the text box, so nothing below it is cut.
+            const int quoteBottom = quote->mapTo(&host, QPoint(0, quote->height())).y();
+            if (quoteBottom > box->mapTo(&host, QPoint()).y())
+                return -2;
+            return quote->height() % pitch ? -3 : quote->height() / pitch;
+        };
+        QCOMPARE(lineCount(QStringLiteral("had")), 1);
+        QString longPassage;
+        for (int i = 0; i < 40; ++i)
+            longPassage += QStringLiteral("the remarkable optimism of someone who had never ");
+        QCOMPARE(lineCount(longPassage), 3);
+    }
+
     void marksSortingAndAnnotationRows_data() { variants(); }
 
     void marksSortingAndAnnotationRows()
@@ -3270,7 +3305,8 @@ private slots:
         QCOMPARE(selected, QString("first"));
         QCOMPARE(row()->detailLabel()->text(), a.excerpt);
         QVERIFY(row()->titleLabel()->font().pixelSize() < row()->detailLabel()->font().pixelSize());
-        QVERIFY(row()->detailLabel()->y() - row()->titleLabel()->geometry().bottom() >= ui::px(12));
+        // A small gap separates the chapter from the excerpt.
+        QVERIFY(row()->detailLabel()->y() - row()->titleLabel()->geometry().bottom() >= ui::px(6));
         QVERIFY(row()->detailLabel()->wordWrap());
         QVERIFY(row()->detailLabel()->height()
                 > 2 * QFontMetrics(row()->detailLabel()->font()).height());
@@ -3364,7 +3400,8 @@ private slots:
         bookmark->click();
         QCOMPARE(selected, QString("first"));
         QVERIFY(bookmark->detailLabel()->wordWrap());
-        QCOMPARE(bookmark->height(), annotationHeight - (int(ui::px(12)) - int(ui::px(4))));
+        // Annotation rows leave 6 pixels below the chapter, bookmarks 4.
+        QCOMPARE(bookmark->height(), annotationHeight - (int(ui::px(6)) - int(ui::px(4))));
         QCOMPARE(bookmark->titleLabel()->font().pixelSize(), int(ui::px(24)));
         QVERIFY(bookmark->detailLabel()->y() - bookmark->titleLabel()->geometry().bottom()
                 >= ui::px(4));
@@ -4598,6 +4635,70 @@ private slots:
         QCOMPARE(surface->grab().toImage(), coverPixels);
         opening->setReopening();
         QCOMPARE(hint->text(), QLocale().toUpper(strings::get("opening.may_take_a_while")));
+    }
+
+    void openingLogoSplash()
+    {
+        for (bool dark : { false, true }) {
+            for (const QSize size : { QSize(1072, 1448), QSize(1448, 1072) }) {
+                QWidget owner;
+                auto opening = createOpeningSurface(&owner, dark, test::makeHostPresentation);
+                auto *view = opening->window();
+                view->resize(size);
+                QVERIFY(view->findChildren<QLabel *>().isEmpty());
+                QVERIFY(view->findChildren<QProgressBar *>().isEmpty());
+                bool first = false, controls = false;
+                opening->afterFirstPaint([&] {
+                    first = true;
+                    const auto pixels = view->grab().toImage();
+                    const auto background = dark ? qRgb(0, 0, 0) : qRgb(255, 255, 255);
+                    QRect ink;
+                    for (int y = 0; y < pixels.height(); ++y)
+                        for (int x = 0; x < pixels.width(); ++x)
+                            if (pixels.pixel(x, y) != background)
+                                ink = ink.united(QRect(x, y, 1, 1));
+                    QVERIFY(!ink.isEmpty());
+                    QVERIFY(qAbs(ink.center().x() - pixels.rect().center().x()) <= 1);
+                    QVERIFY(qAbs(ink.center().y() - pixels.rect().center().y()) <= 1);
+                    QVERIFY(ink.width() < size.width() / 2);
+                    QVERIFY(ink.height() < size.height() / 2);
+                    // The wordmark extends beyond the narrower six-bar symbol.
+                    QVERIFY(ink.width() > 80 * qMin(size.width() / 402.0, size.height() / 543.0));
+                    QVERIFY(view->findChildren<QProgressBar *>().isEmpty());
+                    opening->prepareControls({ { "dark_mode", dark } });
+                    opening->afterFirstPaint([&] { controls = true; });
+                });
+                view->show();
+                QTRY_VERIFY(first);
+                QTRY_VERIFY(controls);
+                auto *bar = view->findChild<QProgressBar *>("rrOpeningProgress");
+                QVERIFY(bar && bar->isVisible());
+                opening->setProgress(20);
+                QCOMPARE(bar->value(), 20);
+            }
+        }
+        QWidget owner;
+        auto splash = createOpeningSurface(&owner, false, test::makeHostPresentation);
+        bool prepared = false;
+        splash->afterFirstPaint([&] { prepared = true; });
+        splash->window()->show();
+        splash->window()->reject();
+        QCoreApplication::processEvents();
+        QVERIFY(!prepared);
+
+        // A prepared book keeps the logo: progress, cover and status calls
+        // before the controls exist change nothing, and a fallback still
+        // gets its controls.
+        auto logoOnly = createOpeningSurface(&owner, false, test::makeHostPresentation);
+        logoOnly->window()->show();
+        logoOnly->setProgress(60);
+        logoOnly->setReopening();
+        QImage cover(120, 180, QImage::Format_RGB32);
+        cover.fill(Qt::gray);
+        logoOnly->setCover(cover);
+        QVERIFY(!logoOnly->window()->findChild<QProgressBar *>("rrOpeningProgress"));
+        logoOnly->showFallback(OpeningFallback::Protected);
+        QVERIFY(logoOnly->window()->findChild<QProgressBar *>("rrOpeningProgress"));
     }
 
     void openingFirstPaintCallback()

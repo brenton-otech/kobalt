@@ -10,20 +10,30 @@ namespace kobalt {
 class AssetBundle
 {
 public:
-    AssetBundle(QString root, QString expectedVersion);
+    enum class Verification { OnDemand, Explicit };
+    AssetBundle(QString root, QString expectedVersion,
+                Verification verification = Verification::OnDemand);
     ~AssetBundle();
     AssetBundle(const AssetBundle &) = delete;
     AssetBundle &operator=(const AssetBundle &) = delete;
     bool available() const;
+    // Explicit bundles remain unavailable until this full check succeeds.
+    // Run at storage lifecycle boundaries, on a worker, never on book opening.
+    bool verify(const std::function<bool()> &current = {});
     bool hasFilesystemRecoveryFiles() const;
     void invalidate();
+    // Whether this optional asset, named as in the manifest such as
+    // "fonts/ebook-core/Libron-Regular.ttf", failed its check and is left out.
+    bool setAside(const QString &name) const;
+    QMap<QString, QByteArray> verifiedFontDigests() const;
     QString file(const QString &name) const;
     QByteArray fontData(const QString &name) const;
     // Capture verified metadata without retaining font bytes or this bundle.
     // The reader checks the file again when it is first needed.
     std::function<QByteArray()> deferredFontData(const QString &name) const;
     // Verify the whole bundle once for a batch. Each reader still verifies its
-    // own file when called. A missing member rejects the complete batch.
+    // own file when called. A set-aside member is left out of the result; any
+    // other missing member rejects the complete batch.
     QMap<QString, std::function<QByteArray()>> deferredFontData(const QStringList &names) const;
     // Checks one font against the manifest without verifying the whole bundle
     // first. After a full verification, this is the same as fontData().
@@ -33,6 +43,7 @@ public:
     const QString &root() const;
 
 private:
+    bool verifyFiles() const;
     struct Data;
     std::unique_ptr<Data> data;
 };

@@ -6,6 +6,8 @@
 #include "reading/sleep_screen.h"
 #include "reading/session_timeout.h"
 #include "reading/remaining_time.h"
+#include "reading/header_footer.h"
+#include "reading/rendering_mode.h"
 #include "support/qt_compat.h"
 #include "check.h"
 #include <QJsonArray>
@@ -98,6 +100,101 @@ int main()
                         && sleep::tile(clean) == sleep::Tile::None,
                 "Invalid sleep design lost the legacy selection");
     }
+    {
+        // Custom: one look while sleeping and charging, another when powered off.
+        const auto defaults = sleep::custom({});
+        require(defaults.same && defaults.sleep.backdrop == sleep::Mode::Cover
+                        && defaults.sleep.status == sleep::Design::Bookmark
+                        && defaults.off == defaults.sleep,
+                "A missing Custom screen must default to the cover with the bookmark");
+        sleep::Custom custom;
+        custom.same = false;
+        custom.sleep = { sleep::Mode::Wallpaper, sleep::Design::Seal, QStringLiteral("waves.png") };
+        custom.off = { sleep::Mode::Page, sleep::Design::Cover, {} };
+        QJsonObject preferences;
+        sleep::setCustom(preferences, custom);
+        sleep::setDesign(preferences, sleep::Design::Custom);
+        preferences = appearance::cleanPreferences(preferences);
+        const auto read = sleep::custom(preferences);
+        require(sleep::design(preferences) == sleep::Design::Custom && !read.same
+                        && read.sleep == custom.sleep && read.off == custom.off,
+                "A Custom screen did not survive preference cleanup");
+        const auto sleeping = sleep::look(preferences), off = sleep::look(preferences, true);
+        require(sleeping.design == sleep::Design::Seal && sleeping.mode == sleep::Mode::Wallpaper
+                        && sleeping.tile == sleep::Tile::None,
+                "Custom sleep did not resolve to its status and backdrop");
+        require(off.design == sleep::Design::Cover && off.mode == sleep::Mode::Page
+                        && off.tile == sleep::Tile::None,
+                "Custom power off did not use its own look");
+        require(sleep::uses(preferences, sleep::Mode::Page)
+                        && sleep::uses(preferences, sleep::Mode::Wallpaper)
+                        && !sleep::uses(preferences, sleep::Mode::Cover),
+                "Custom must prepare exactly the backdrops it shows");
+        // An older Kobalt reads the cover with the bookmark.
+        require(sleep::savedMode(preferences) == sleep::Mode::Cover
+                        && sleep::savedTile(preferences) == sleep::Tile::Bookmark,
+                "Custom must leave a valid legacy screen for older releases");
+        custom.same = true;
+        sleep::setCustom(preferences, custom);
+        require(sleep::look(preferences, true).design == sleep::Design::Seal,
+                "The same screen must also show when powered off");
+        auto layer = sleep::layer(qt::object({ { "background", "photo" },
+                                               { "status", "night" },
+                                               { "wallpaper", "../escape.png" } }));
+        require(layer.backdrop == sleep::Mode::Cover && layer.status == sleep::Design::Bookmark
+                        && layer.wallpaper.isEmpty(),
+                "Invalid Custom fields must fall back one by one");
+        for (const auto &wrong : { QJsonValue("custom"), QJsonValue(3) })
+            require(!appearance::cleanPreferences(qt::object({ { sleep::customKey, wrong },
+                                                               { sleep::placesKey, wrong } }))
+                             .contains(sleep::customKey),
+                    "A Custom screen that is not an object must be removed");
+        sleep::Layer start;
+        require(sleep::asLayer(sleep::Design::Page, sleep::Tile::Card, start)
+                        && start.backdrop == sleep::Mode::Page
+                        && start.status == sleep::Design::Card
+                        && !sleep::asLayer(sleep::Design::Night, sleep::Tile::Bookmark, start),
+                "Custom must start from presets that are a backdrop with one status");
+    }
+    {
+        // Positions: the book's own place wins over the global one.
+        QJsonObject global, book;
+        sleep::setPlace(global, sleep::Design::Seal, sleep::Place::TopLeft);
+        sleep::setPlace(global, sleep::Design::Pill, sleep::Place::Bottom);
+        sleep::setPlace(global, sleep::Design::Card, sleep::Place::Left);
+        require(global.size() == 1, "Default and invalid places must not be saved");
+        const auto preferences = qt::object({ { sleep::placesKey, global } });
+        require(sleep::place(preferences, {}, sleep::Design::Seal) == sleep::Place::TopLeft
+                        && sleep::place(preferences, {}, sleep::Design::Medallion)
+                                == sleep::Place::Default,
+                "A moved status must keep its place");
+        book[sleep::value(sleep::Design::Seal)] = sleep::value(sleep::Place::BottomRight);
+        require(sleep::place(preferences, book, sleep::Design::Seal) == sleep::Place::BottomRight,
+                "The book's own place must win over the global one");
+        const sleep::Look pageBookmark{ sleep::Design::Page, sleep::Mode::Page,
+                                        sleep::Tile::Bookmark };
+        require(sleep::statusDesign(pageBookmark) == sleep::Design::Bookmark,
+                "Reading page must move its bookmark");
+        for (const auto design : sleep::designs)
+            for (const auto option : sleep::places(design))
+                require(sleep::savedPlace(
+                                qt::object({ { sleep::value(design), sleep::value(option) } }),
+                                design)
+                                == option,
+                        "A place did not survive saving");
+    }
+    require(sleep::followsReading({}), "Sleep screens must follow reading orientation by default");
+    for (bool follow : { false, true }) {
+        const auto clean =
+                appearance::cleanPreferences({ { sleep::followOrientationKey, follow } });
+        require(sleep::followsReading(clean) == follow, "Sleep orientation choice was lost");
+    }
+    for (const QJsonValue &invalid : { QJsonValue("false"), QJsonValue(0), QJsonValue() }) {
+        const auto clean =
+                appearance::cleanPreferences({ { sleep::followOrientationKey, invalid } });
+        require(!clean.contains(sleep::followOrientationKey) && sleep::followsReading(clean),
+                "Invalid sleep orientation must use the default");
+    }
     for (const int length : { 0, sleep::greetingLength, sleep::greetingLength + 1 }) {
         const auto clean = appearance::cleanPreferences(
                 { { sleep::greetingKey, QString(length, QLatin1Char('a')) } });
@@ -147,6 +244,32 @@ int main()
         require(!appearance::cleanPreferences({ { "chapter_groups", invalid } })
                          .contains("chapter_groups"),
                 "Invalid chapter group choice did not fall back to Current section");
+    require(!headerfooter::decimalPercentages({}),
+            "Older preferences did not retain whole percentages");
+    for (const auto *format : { "whole", "decimal" }) {
+        const auto preferences = appearance::cleanPreferences(
+                { { headerfooter::percentageFormatKey, format }, { "future_option", 42 } });
+        require(preferences.value(headerfooter::percentageFormatKey).toString() == format
+                        && preferences.value("future_option").toInt() == 42,
+                "Percentage format cleanup lost saved preferences");
+        require(headerfooter::decimalPercentages(preferences) == (QString(format) == "decimal"),
+                "Percentage format loaded incorrectly");
+        require(appearance::same({}, preferences), "Percentage format invalidated book layout");
+    }
+    for (const auto &invalid :
+         { QJsonValue("unknown"), QJsonValue(true), QJsonValue(1), QJsonValue(),
+           QJsonValue(QJsonObject()), QJsonValue(QJsonArray()) }) {
+        require(!headerfooter::decimalPercentages(
+                        { { headerfooter::percentageFormatKey, invalid } }),
+                "Invalid percentage format did not use whole percentages");
+        const auto preferences = appearance::cleanPreferences(
+                { { headerfooter::percentageFormatKey, invalid }, { "future_option", 42 } });
+        require(!preferences.contains(headerfooter::percentageFormatKey)
+                        && !headerfooter::decimalPercentages(preferences)
+                        && preferences.value("future_option").toInt() == 42,
+                "Percentage format cleanup lost the default or an unknown field");
+    }
+
     require(!remainingTime::approximate({}), "Older preferences did not retain detailed estimates");
     for (const auto *format : { "detailed", "approximate" }) {
         const auto preferences = appearance::cleanPreferences(
@@ -167,6 +290,63 @@ int main()
                 "Invalid time format did not fall back to detailed estimates");
     }
 
+    {
+        // Rendering is Hybrid without a choice. The test override wins, then
+        // KOBALT_CHAPTER_MODE, then the preference.
+        using renderingMode::Mode;
+        require(renderingMode::fromPreferences({}) == Mode::Hybrid,
+                "Preferences without Rendering did not use Hybrid");
+        for (const auto mode : { Mode::Hybrid, Mode::Fast, Mode::Accurate }) {
+            const auto preferences = appearance::cleanPreferences(
+                    { { renderingMode::preferenceKey, renderingMode::value(mode) },
+                      { "future_option", 42 } });
+            // Settings does not offer Fast for now. Its saved value stays
+            // and opens as Hybrid.
+            const auto opens = mode == Mode::Fast ? Mode::Hybrid : mode;
+            require(renderingMode::fromPreferences(preferences) == opens
+                            && preferences.value(renderingMode::preferenceKey).toString()
+                                    == renderingMode::value(mode)
+                            && preferences.value("future_option").toInt() == 42,
+                    "Rendering cleanup lost a saved choice or an unknown field");
+            require(appearance::same({}, preferences), "Rendering invalidated the book layout");
+        }
+        for (const auto &invalid : { QJsonValue("chapter"), QJsonValue(true), QJsonValue(1) }) {
+            const auto preferences =
+                    appearance::cleanPreferences({ { renderingMode::preferenceKey, invalid } });
+            require(!preferences.contains(renderingMode::preferenceKey)
+                            && renderingMode::fromPreferences(preferences) == Mode::Hybrid,
+                    "Invalid Rendering did not fall back to Hybrid");
+        }
+        const auto pinned = qgetenv("KOBALT_CHAPTER_MODE");
+        qunsetenv("KOBALT_CHAPTER_MODE");
+        require(renderingMode::effective(Mode::Fast) == Mode::Fast
+                        && renderingMode::effective(Mode::Hybrid) == Mode::Hybrid
+                        && renderingMode::effective(Mode::Accurate) == Mode::Accurate,
+                "Without an override the preference must choose the mode");
+        qputenv("KOBALT_CHAPTER_MODE", "2");
+        require(renderingMode::effective(Mode::Accurate) == Mode::Hybrid,
+                "KOBALT_CHAPTER_MODE=2 must be Hybrid");
+        renderingMode::apply({});
+        require(renderingMode::countsInBackground(), "Hybrid must count pages in the background");
+        qputenv("KOBALT_CHAPTER_MODE", "1");
+        require(renderingMode::effective(Mode::Accurate) == Mode::Fast,
+                "KOBALT_CHAPTER_MODE=1 must win over Accurate");
+        qputenv("KOBALT_CHAPTER_MODE", "0");
+        require(renderingMode::effective(Mode::Fast) == Mode::Accurate,
+                "KOBALT_CHAPTER_MODE=0 must win over Fast");
+        renderingMode::setOverride(1);
+        require(renderingMode::effective(Mode::Accurate) == Mode::Fast
+                        && !renderingMode::countsInBackground(),
+                "The test override must win over the environment");
+        renderingMode::setOverride(-1);
+        require(renderingMode::effective(Mode::Fast) == Mode::Accurate,
+                "Removing the override must return to the environment");
+        if (pinned.isEmpty())
+            qunsetenv("KOBALT_CHAPTER_MODE");
+        else
+            qputenv("KOBALT_CHAPTER_MODE", pinned);
+    }
+
     for (int i = 0; i < int(std::size(features::keys)); ++i) {
         const auto feature = features::Feature(i);
         require(features::enabled({}, feature), "A feature was hiddenFeatures by default");
@@ -181,6 +361,8 @@ int main()
                                            { "disable_annotations", true },
                                            { "disable_bookmarks", true },
                                            { "disable_words", true },
+                                           { "disable_highlight_links", true },
+                                           { "tappable_links", "all" },
                                            { "save_looked_up_words", false },
                                            { "default_menu_view", "stats" },
                                            { "dense_stats_chart", true },
@@ -194,6 +376,8 @@ int main()
                     && !hiddenFeatures.contains("minimal_annotation_mode")
                     && !hiddenFeatures.contains("marks_sort")
                     && !hiddenFeatures.contains("save_looked_up_words")
+                    && !features::enabled(hiddenFeatures, features::HighlightLinks)
+                    && hiddenFeatures.value("tappable_links") == "all"
                     && hiddenFeatures.value("future_option").toInt() == 42,
             "Hidden features retained incompatible options or lost unrelated preferences");
     // My Words shares the bookmarks' sort order, so it keeps the order alone.
@@ -756,6 +940,16 @@ int main()
     require(!appearance::readerPreferences(qt::object({ { "orientation", 2 } }), sharedOrientation)
                      .contains("auto_rotate"),
             "An old book enabled automatic rotation over a global orientation lock");
+    auto locked = sharedOrientation;
+    locked["locked_orientation"] = 8;
+    require(appearance::cleanPreferences(locked) == locked,
+            "Cleaning settings must preserve the exact lock independently of the mode");
+    for (const auto &invalid : { QJsonValue(true), QJsonValue(-1), QJsonValue(3),
+                                 QJsonValue(1.5), QJsonValue("8") }) {
+        locked["locked_orientation"] = invalid;
+        require(appearance::cleanPreferences(locked) == sharedOrientation,
+                "An invalid lock must keep the chosen rotation mode");
+    }
     require(!appearance::readerPreferences({}, qt::object({ { "bionic_reading", "bold" } }))
                             .contains("bold_reading")
                     && !appearance::readerPreferences({}, {}).contains("bold_reading"),

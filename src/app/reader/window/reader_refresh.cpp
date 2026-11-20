@@ -1,3 +1,4 @@
+#include "reading/header_footer.h"
 #include "render/page_content.h"
 #include "ui/controls/rows.h"
 #include "ui/controls/text.h"
@@ -55,11 +56,12 @@ void Reader::refresh()
 {
     if (lifecycleHidden)
         return;
+    recoverSleepSave();
     // A KOSync result that waited while the reader was hidden continues now.
     if (syncCoordinator && isVisible() && !services.suspended())
         syncCoordinator->resume();
     const bool darkReady = publishPendingDarkMode();
-    if (general->isVisible())
+    if (settingsVisible())
         static_cast<SettingsPanel *>(general)->updateButtonControls(
                 buttonControls(), preferences,
                 savingButtonControls || savingDarkMode >= 0 || savingDenseGraph);
@@ -68,9 +70,11 @@ void Reader::refresh()
                                           : session->state().value("dark_mode").toBool(false);
     const bool darkEnabled = savingDarkMode < 0 && pendingDarkMode < 0 && !session->busy()
             && !session->temporaryTypography();
-    if (!restoringDefaults)
-        darkOption->setChecked(dark);
-    darkOption->setEnabled(darkEnabled);
+    if (darkOption) {
+        if (!restoringDefaults)
+            darkOption->setChecked(dark);
+        darkOption->setEnabled(darkEnabled);
+    }
     lightPopup->setDarkModeShortcut(services.lightAvailable(), dark, darkEnabled);
     if (recordedOpening && !kosyncStarted)
         synchronizeKosync();
@@ -86,6 +90,9 @@ void Reader::refresh()
     // new page is painted, in the refresh that paintTurn() requests.
     if (!turnFrame)
         syncKosyncWhileReading();
+    // The new page's header shows the time of the turn that produced it.
+    if (turnFrame && turnStarted.isValid())
+        pageTurnMilliseconds = turnStarted.elapsed();
     // The refresh that paintTurn() requested: the same page, already painted.
     const bool afterTurn = turnPainted && !turnFrame;
     if (!turnFrame)
@@ -141,6 +148,9 @@ void Reader::refresh()
         paintTurn();
         return;
     }
+    // A turn that a panel covers is not painted as a turn.
+    if (turnFrame)
+        turnStarted.invalidate();
     if (afterTurn && controlsHidden()) {
         // A page turn changes only what the hidden menu and panels show.
         // They sync when they open; see syncStaleControls().
@@ -185,6 +195,8 @@ void Reader::refresh()
     }
     openPendingDestination();
     syncNavigation();
+    if (seekOpen && !session->busy())
+        pageScrubber->showCurrentPage();
     finishAnnotationPresentation();
 }
 
@@ -200,8 +212,11 @@ bool Reader::publishPendingDarkMode()
     if (session->state().value("dark_mode").toBool(false) != target
         || (appearanceEdit.preview()
             && appearanceEdit.preview()->state().value("dark_mode").toBool(false) != target)) {
-        settingsError->setText(strings::get("reader.could_not_change_dark_mode"));
-        settingsError->show();
+        // Settings shows the error; it clears the line when it opens.
+        if (settingsError) {
+            settingsError->setText(strings::get("reader.could_not_change_dark_mode"));
+            settingsError->show();
+        }
         return false;
     }
     return true;
@@ -209,6 +224,19 @@ bool Reader::publishPendingDarkMode()
 
 void Reader::syncFrameState()
 {
+    if (choices->isVisible() && !choosingTypography) {
+        QVector<int> pages;
+        for (const auto &chapter : session->chapters())
+            pages.append(chapter.page);
+        choices->setChapterPages(pages);
+        choices->setChapterPosition(
+                session->bookPages() > 0
+                        ? strings::get("stats.page_of")
+                                  .arg(session->bookPage() + 1)
+                                  .arg(headerfooter::pageTotal(session->bookPages(),
+                                                               session->bookPagesEstimated()))
+                        : strings::get("common.percent").arg(session->progressPercent()));
+    }
     syncBookmarks();
     if (!session->busy() && !pendingSearchHit.start.isEmpty()) {
         const auto hit = std::exchange(pendingSearchHit, {});
@@ -263,7 +291,8 @@ void Reader::finishAppearanceApply()
             if (!switchingAppearance) {
                 choices->hide();
                 menu->hide();
-                general->hide();
+                if (general)
+                    general->hide();
                 if (returnToReading) {
                     topControls->hide();
                     bottomControls->hide();
@@ -280,7 +309,7 @@ bool Reader::syncFontPicker()
 {
     const bool pickingFont = choosingTypography && choices->isVisible() && choices->isFontPicker();
     if (choosingTypography && appearanceEdit.panelOpen() && panels->currentIndex() == 0)
-        menu->setVisible(!pickingFont && !general->isVisible());
+        menu->setVisible(!pickingFont && !settingsVisible());
     return pickingFont;
 }
 
@@ -321,6 +350,8 @@ void Reader::syncAppearancePreview()
             && panels->currentIndex() == int(kobalt::reader::AppearancePage::Typography);
     if (!layoutOpen)
         appearancePreviewAxis = Axis::None;
+    if (!appearancePreview)
+        return;
     if ((!layoutOpen && !textOpen) || !appearancePreviewFits()) {
         // Navigation can cancel this request without changing the reading image.
         previewPageKey = previewPageRequested = 0;
@@ -417,21 +448,27 @@ void Reader::showPageImage(const QImage &nextImage)
         // Clear them without cancelling the gesture that edits the preview.
         page->mark({});
         page->animationDirection = isVisible() && !appearanceEdit.panelOpen()
-                        && !topControls->isVisible() && !general->isVisible()
+                        && !topControls->isVisible() && !settingsVisible()
                         && !linkReturn->isVisible() && !syncDialog && !kosyncDialog && !finishDialog
                         && !services.suspended()
                         && (services.softwarePageAnimations
                                     ? pageTurn::selected(preferences) != pageTurn::Style::Off
                                     : preferences.value("page_animations").toBool(false))
-                        && pageAnimationsAvailable(services.animationSupport())
+                        && pageAnimationsEnabled(services.animationSupport(),
+                                                 session->state().value("dark_mode").toBool(false))
                 ? session->turnDirection()
                 : 0;
     }
     if (!page->viewportTransition())
         page->image = std::move(displayedImage);
     // Only a turn forward counts towards the session's pace; jumps and reflows do not.
-    if (!session->busy())
-        book->pace().observe(session->page(), session->turnDirection() > 0);
+    if (!session->busy()) {
+        if (session->state().contains("book_fraction"))
+            book->pace().observePosition(session->state().value("position").toString(),
+                                         session->turnDirection() > 0);
+        else
+            book->pace().observe(session->page(), session->turnDirection() > 0);
+    }
 }
 
 // The reflow placeholder repeats the word lengths of the displayed page. Read
@@ -463,7 +500,7 @@ void Reader::paintTurn()
     QElapsedTimer painting;
     if (turnStarted.isValid())
         painting.start();
-    page->progressFraction = pageProgressFraction(session->page(), session->pages());
+    page->progressFraction = session->progressFraction();
     page->preparedDamage = session->damage();
     page->preparedFrom = session->damageFrom();
     // The Refresh the screen setting decides which turns flash.
@@ -480,7 +517,7 @@ void Reader::paintTurn()
                 { { "render_id", double(session->renderId()) }, { "page", session->page() } },
                 false);
     page->refreshContent(true, true);
-    if (turnStarted.isValid()) {
+    if (turnStarted.isValid() && kobalt::diagnosticsActive())
         kobalt::diagnostic("page-turn-painted",
                            { { "render_id", double(session->renderId()) },
                              { "page", session->page() },
@@ -488,8 +525,7 @@ void Reader::paintTurn()
                              { "render_ms", rendered },
                              { "paint_ms", painting.nsecsElapsed() / 1e6 } },
                            false);
-        turnStarted.invalidate();
-    }
+    turnStarted.invalidate();
     // The screen composes the flushed page from the event loop. Return
     // to it now; the second pass finds the page unchanged and does the rest.
     turnPainted = true;
@@ -503,6 +539,12 @@ void Reader::syncAppearanceControls(bool pickingFont)
     previewLabel->setText(appearanceEdit.error());
     previewLabel->setVisible(!pickingFont && !appearanceEdit.error().isEmpty());
     if (appearanceEdit.previewState() == AppearanceEditSession::PreviewState::Opening) {
+        return;
+    }
+    // The controls are set when they are built; the book's preset follows
+    // the text before that too.
+    if (!appearanceBuilt) {
+        syncTextPresets();
         return;
     }
     if (!sizeSlider->interacting()) {
@@ -607,9 +649,13 @@ void Reader::syncStaleControls()
 // The part of syncReadingControls() that does not depend on a visible control.
 void Reader::syncReadingState()
 {
-    if (session->busy())
-        pageScrubber->cancel();
-    page->progressFraction = pageProgressFraction(session->page(), session->pages());
+    if (session->busy()) {
+        if (seekOpen && session->state().contains("book_fraction"))
+            pageScrubber->beginNavigation();
+        else
+            pageScrubber->cancel();
+    }
+    page->progressFraction = session->progressFraction();
     if (!session->busy())
         applyingText = false;
     refreshRenderNotice();
@@ -618,20 +664,46 @@ void Reader::syncReadingState()
 
 void Reader::syncReadingControls()
 {
-    if (session->busy())
-        pageScrubber->cancel();
+    if (session->busy()) {
+        if (seekOpen && session->state().contains("book_fraction"))
+            pageScrubber->beginNavigation();
+        else
+            pageScrubber->cancel();
+    }
+    const bool chapterBar = session->state().contains("book_fraction");
     QVector<QPair<int, QString>> chapters;
     for (const auto &chapter : session->chapters())
         chapters.append({ chapter.page, chapter.title });
-    pageScrubber->setChapterJumps(pageNavigation::barButtons(preferences)
-                                  == pageNavigation::BarButtons::Chapters);
-    pageScrubber->setBook(session->page(), session->pages(), chapters, session->image().size());
+    // The turn may adopt Hybrid's whole-book layout. Keep the open Navigate
+    // panel until it can show the new reading page in whole-book coordinates.
+    const bool keepNavigation = seekOpen && !chapterBar && !session->busy()
+            && !resizePending && !appearanceEdit.applying() && pageScrubber->chapterNavigationPending();
+    pageScrubber->setChapterBar(chapterBar, keepNavigation);
+    pageScrubber->setChapterJumps(chapterBar
+                                  || pageNavigation::barButtons(preferences)
+                                          == pageNavigation::BarButtons::Chapters,
+                                  keepNavigation);
+    if (chapterBar) {
+        const bool before =
+                session->page() > 0 || session->state().value("continues_before").toBool();
+        const bool after = session->page() + 1 < session->pages() || session->continuesAfter();
+        pageScrubber->setBook(int(before), 1 + int(before) + int(after), {},
+                              session->image().size());
+        QVector<int> chapterPages;
+        for (const auto &chapter : chapters)
+            chapterPages.append(chapter.first);
+        pageScrubber->setChapterPosition(session->contentsSelection().current, chapters.size(),
+                                         session->chapterTitle(), session->progressPercent(),
+                                         session->bookPage(), session->bookPages(), chapterPages);
+    } else {
+        pageScrubber->setBook(session->page(), session->pages(), chapters, session->image().size());
+    }
     pageScrubber->setEnabled(!session->busy());
     const auto chapter = session->chapterTitle().isEmpty() ? strings::get("reader.contents")
                                                            : session->chapterTitle();
     chapterButton->setText(chapter);
     chapterButton->setAccessibleName(strings::get("reader.contents_detail").arg(chapter));
-    page->progressFraction = pageProgressFraction(session->page(), session->pages());
+    page->progressFraction = session->progressFraction();
     if (!session->busy())
         applyingText = false;
     refreshRenderNotice();
@@ -645,13 +717,13 @@ void Reader::syncReadingControls()
     // Settings applies the newest draft, or waits for the preview to open.
     // Its click handler ignores taps while a panel's changes apply.
     toolbarButtons.settings->setEnabled(!session->busy() || appearanceEdit.applying());
-    toolbarButtons.typography->setChecked(!general->isVisible() && appearanceEdit.panelOpen()
+    toolbarButtons.typography->setChecked(!settingsVisible() && appearanceEdit.panelOpen()
                                           && panels->currentIndex() == 0);
-    toolbarButtons.layout->setChecked(!general->isVisible() && appearanceEdit.panelOpen()
+    toolbarButtons.layout->setChecked(!settingsVisible() && appearanceEdit.panelOpen()
                                       && panels->currentIndex()
                                               != int(kobalt::reader::AppearancePage::Typography));
-    toolbarButtons.settings->setChecked(general->isVisible());
-    const bool settingsOpen = general->isVisible();
+    toolbarButtons.settings->setChecked(settingsVisible());
+    const bool settingsOpen = settingsVisible();
     // Zen mode moves Search, Annotate and Bookmarks to the bottom tabs.
     const bool zen = zenMode();
     for (auto *action : std::initializer_list<QWidget *>{ toolbarComposition.exitAction,
@@ -677,8 +749,9 @@ void Reader::syncReadingControls()
                     { bookmarksShown ? ui::ControlIcon::Bookmark : ui::ControlIcon::Note,
                       ui::IconRendition::Action });
     }
-    toolbarComposition.annotate->setVisible(
-            !settingsOpen && !zen && features::enabled(preferences, features::Annotations));
+    toolbarComposition.annotate->setVisible(!settingsOpen && !zen
+                                            && features::enabled(preferences, features::Annotations)
+                                            && !quickAnnotations());
     toolbarComposition.bookmarks->setVisible(!settingsOpen && !zen
                                              && (bookmarksShown || annotationsShown || wordsShown));
     toolbarComposition.formattingWarning->setVisible(!settingsOpen && !zen
@@ -691,13 +764,21 @@ void Reader::syncReadingControls()
     if (chapterGraph->isVisible())
         updateGraph();
     updateOrientationBlock();
+    const bool locked = orientation->locked();
     for (auto *button : rotationButtons) {
+        button->setEnabled(!locked);
         button->setChecked(!orientation->automatic()
                            && button->property("orientation").toInt()
                                    == int(orientation->manual()));
     }
     if (autoRotateOption) {
+        autoRotateOption->setEnabled(!locked);
         autoRotateOption->setChecked(orientation->automatic());
+    }
+    if (lockRotationOption) {
+        ui::buttonIcon(lockRotationOption,
+                       locked ? ui::ControlIcon::Lock : ui::ControlIcon::LockOpen);
+        lockRotationOption->setChecked(locked);
     }
     updateLinkReturn();
 }
@@ -735,7 +816,7 @@ void Reader::openPendingDestination()
 {
     if (appearanceEdit.panelDestination() && !session->busy() && !appearanceEdit.applying()) {
         if (appearanceEdit.externalDestination()) {
-            if (!appearanceEdit.panelOpen() && !general->isVisible()) {
+            if (!appearanceEdit.panelOpen() && !settingsVisible()) {
                 const auto destination = appearanceEdit.takeDestination();
                 if (!lifecycleHidden && !services.suspended() && !exitPending) {
                     if (destination == AppearanceDestination::Stats)
@@ -762,8 +843,9 @@ void Reader::openPendingDestination()
 void Reader::updateGraph()
 {
     const bool counted = session->totalWords() >= 0;
-    const auto graph = counted ? session->chapterGraph()
-                               : kobalt::chapterPageLengths(session->chapters(), session->pages());
+    const auto graph = counted
+            ? session->chapterGraph()
+            : kobalt::chapterPageLengths(session->chapters(), session->bookPages());
     chapterGraph->setData(graph, counted ? session->graphSelection() : session->contentsSelection(),
                           true, {});
     const auto contents = session->chapters();
@@ -771,17 +853,20 @@ void Reader::updateGraph()
     int nextPages = 0;
     if (next >= 0 && next < contents.size()) {
         const int start = contents[next].page;
-        int end = session->pages();
+        int end = session->bookPages();
         for (const auto &chapter : contents)
             if (chapter.page > start)
                 end = qMin(end, chapter.page);
-        nextPages = qMax(1, end - start);
+        if (start >= 0 && end > start)
+            nextPages = end - start;
     }
     chapterGraph->setChapterNumber(session->contentsSelection().current + 1, contents.size());
     updateReadingStats();
     chapterGraph->setProgress(session->chapterTitle(), session->chapterPage(),
-                              session->chapterPages(), nextPages, session->page(),
-                              session->pages());
+                              session->chapterPages(), nextPages, session->bookPage(),
+                              session->bookPages(),
+                              session->bookPages() > 0 ? -1 : session->progressFraction(),
+                              session->bookPagesEstimated());
 }
 
 void Reader::refreshStatus()
@@ -792,7 +877,7 @@ void Reader::refreshStatus()
         updateMenuStatus();
         return;
     }
-    if (!chromeTicks() || general->isVisible() || dictionaryPanel->isVisible()
+    if (!chromeTicks() || settingsVisible() || dictionaryPanel->isVisible()
         || searchPanel->isVisible() || linksActive())
         return;
     const auto before = page->slotContents;
@@ -813,7 +898,7 @@ void Reader::updateMenuStatus()
     const auto battery = services.battery();
     menuBattery->setStatus(battery.percent, battery.charging);
     const auto reading = book->sessionReadingMilliseconds();
-    const auto session = reading > 300000
+    const auto session = features::enabled(preferences, features::Stats) && reading > 300000
             ? strings::get("reader.session_minutes").arg(reading / 60000)
             : QString();
     if (menuSession->text() != session)

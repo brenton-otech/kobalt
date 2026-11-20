@@ -1,4 +1,5 @@
 #include "platforms/kobo/common/native_lifecycle.h"
+#include "engine/engine_activity.h"
 #include "storage/profile_database.h"
 #include "storage/reader_storage.h"
 #include "storage/record_writer.h"
@@ -10,6 +11,7 @@
 #include <QSqlQuery>
 #include <QVector>
 #include <atomic>
+#include <memory>
 
 // Nickel's exported managers and signals, resolved by the production adapter.
 class N3PowerWorkflowManager : public QObject
@@ -82,6 +84,8 @@ class PlugWorkflowManager : public QObject
 public:
     static PlugWorkflowManager *sharedInstance();
     bool pluggedInViewVisible() const;
+    void sync();
+    int scans = 0;
 signals:
     void aboutToConnect();
     void aboutToUnplug();
@@ -92,6 +96,11 @@ PlugWorkflowManager *PlugWorkflowManager::sharedInstance()
 {
     static PlugWorkflowManager manager;
     return &manager;
+}
+
+void PlugWorkflowManager::sync()
+{
+    ++scans;
 }
 
 bool PlugWorkflowManager::pluggedInViewVisible() const
@@ -172,6 +181,14 @@ int main(int argc, char **argv)
                         "Suspend hook changed its native arguments");
             };
     kobalt::NativeLifecycle lifecycle(nullptr);
+    int scanCompletions = 0;
+    require(lifecycle.scanLibrary([&] { ++scanCompletions; }) && usb->scans == 1,
+            "Native library scan was not requested");
+    require(!lifecycle.scanLibrary([&] { ++scanCompletions; }) && usb->scans == 1,
+            "A pending library scan was requested twice");
+    emit usb->doneProcessing();
+    emit usb->doneProcessing();
+    require(scanCompletions == 1, "Scan completion was not consumed exactly once");
     require(lifecycle.connected(), "Mock Nickel managers did not connect");
     require(!kobalt::NativeLifecycle::protectStandbyInput(),
             "Reader input guard activated without a reader");
@@ -206,7 +223,20 @@ int main(int argc, char **argv)
         QCoreApplication::processEvents();
         require(!lifecycle.blocked(), "Wake did not release sleep state");
     };
-    // Explicit sleep does not ask canSuspend. An opening must not hold it.
+    // The sleep-screen transition precedes the separate hardware suspend gate.
+    {
+        auto save = std::make_unique<kobalt::EngineDrain>();
+        power->asleep = power->visible = true;
+        emit power->aboutToSleep();
+        QCoreApplication::processEvents();
+        require(!kobalt::NativeLifecycle::canSuspend(), "Sleep suspended an accepted save");
+        kobalt::engineActivity().enter();
+        kobalt::engineActivity().leave();
+        save.reset();
+        require(kobalt::NativeLifecycle::canSuspend(), "Finished save held sleep awake");
+        wake();
+    }
+    // An opening must not prevent Nickel from showing its sleep screen.
     opening = true;
     for (int cycle = 0; cycle < 2; ++cycle) {
         power->asleep = power->visible = true;
@@ -288,17 +318,45 @@ int main(int argc, char **argv)
     kobalt::NativeLifecycle::disconnected();
     cancelledSleepUsb();
     wake();
+    int assetReleases = 0, assetRestores = 0;
+    lifecycle.storageReleased = [&] {
+        require(!available() && !kobalt::NativeLifecycle::nativeSessionSaveAllowed(),
+                "Asset invalidation preceded the storage handoff");
+        ++assetReleases;
+    };
+    lifecycle.storageRestored = [&] {
+        require(available() && kobalt::NativeLifecycle::nativeSessionSaveAllowed(),
+                "Asset verification preceded the completed remount");
+        ++assetRestores;
+    };
     const auto remount = [&] {
+        const int before = assetRestores;
         kobalt::NativeLifecycle::disconnected();
         require(!available(), "Disconnect reopened exported storage");
         emit usb->doneProcessing();
         require(!available(), "An ordinary scan reopened exported storage");
+        require(assetRestores == before, "An ordinary scan rechecked exported assets");
         emit usb->aboutToUnplug();
         emit usb->doneProcessing();
         require(available() && !lifecycle.blocked(), "Remount did not reopen the profile");
         require(kobalt::NativeLifecycle::nativeSessionSaveAllowed(),
                 "Remount left native session saves blocked");
+        require(assetRestores == before + 1, "Remount did not request one asset verification");
+        emit usb->doneProcessing();
+        require(assetRestores == before + 1, "A duplicate scan repeated asset verification");
     };
+    // The drain can finish before Nickel supplies the gadget. Cancelling
+    // then restores storage and its asset check without exporting it.
+    {
+        const int releases = assetReleases, restores = assetRestores;
+        kobalt::NativeLifecycle::beginUsb();
+        drains.takeLast()();
+        require(!available() && assetReleases == releases + 1,
+                "USB preparation did not release storage before gadget handoff");
+        kobalt::NativeLifecycle::disconnected();
+        require(available() && assetRestores == restores + 1,
+                "Cancelled gadget handoff stranded asset verification");
+    }
     // Both native USB entry points must release the connection before handoff.
     for (bool fullWorkflow : { false, true }) {
         if (fullWorkflow)
@@ -326,8 +384,11 @@ int main(int argc, char **argv)
         else
             kobalt::NativeLifecycle::interceptUsb(usb);
         const auto cancelled = drains.takeLast();
+        const int releases = assetReleases, restores = assetRestores;
         kobalt::NativeLifecycle::disconnected();
         cancelled();
+        require(assetReleases == releases && assetRestores == restores,
+                "Cancelled USB cleanup changed asset verification");
         require(available() && !lifecycle.blocked() && handoffs == before,
                 "Cancelled USB cleanup blocked the profile or exported storage");
         require(kobalt::NativeLifecycle::nativeSessionSaveAllowed(),
@@ -337,6 +398,8 @@ int main(int argc, char **argv)
         cancelled();
         require(available() && lifecycle.storageBlocked(),
                 "A stale completion affected the newer USB request");
+        require(assetReleases == releases && assetRestores == restores,
+                "A stale USB completion changed the asset gate");
         current();
         remount();
     }

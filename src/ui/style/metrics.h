@@ -228,7 +228,8 @@ inline constexpr TextPx zenStatsHeight{ 150 }, zenStatText{ 46 }, zenStatUnit{ 2
 } // namespace chrome
 
 namespace chapters {
-// Stats: the chapter row, the chart of every chapter and three figure cells.
+// Stats: the chapter row, the chart of every chapter, a row with the chapter's
+// and the book's word totals, and three figure cells.
 inline constexpr Px rowHeight{ 120 }, headingGap{ 4 }, chartHeight{ 248 };
 inline constexpr Px growthShortEdge{ 1072 }, maximumGrowth{ 150 }, exposedPaper{ 180 };
 inline constexpr Px barsTop{ 30 }, barsHeight{ 150 }, tickGap{ 4 }, tickHeight{ 8 }, tickWidth{ 2 },
@@ -239,7 +240,10 @@ inline constexpr int detailLines = 2;
 inline constexpr Px cellPadding{ 30 }, figureBaseline{ 129 }, detailTop{ 156 }, cellHeight{ 253 };
 inline constexpr Px figureText{ 72 }, unitGap{ 12 };
 inline constexpr TextPx unitText{ chrome::descriptionText };
-inline constexpr Px graphHeight{ rowHeight + chartHeight + cellHeight };
+// The word row labels the chart, so it has no rule above it. Larger interface
+// text makes it taller, keeping the padding below the line.
+inline constexpr Px wordsHeight{ 56 }, wordsPadding{ 12 };
+inline constexpr Px graphHeight{ rowHeight + chartHeight + wordsHeight + cellHeight };
 // Dense charts show every chapter. Past that, and in the sparse chart, a pager
 // bar appears between the chart and the cells.
 inline constexpr int wideChapters = 30, mediumChapters = 60, sparseBars = 20;
@@ -248,7 +252,24 @@ inline constexpr Px minimumBarHeight{ 20 }, minimumBarWidth{ 6 }, maximumBarWidt
         narrowBarWidth{ 16 };
 inline constexpr Px sparseGap{ 12 };
 inline constexpr Px outline{ 2 }, fillInset{ 4 }, narrowFillInset{ 2 };
+// The Activity row under the cells. The chart gives up the height.
+inline constexpr Px activityHeight{ 84 }, activityIconGap{ 18 }, activityColumnWidth{ 170 };
 } // namespace chapters
+
+namespace activity {
+// Activity: today and the streak, the week's bars, figure cells, a month
+// calendar, books, a book's progress, reading hours and milestones.
+inline constexpr Px figureText{ 80 };
+inline constexpr Px barGap{ 40 }, maximumBarWidth{ 96 }, valueGap{ 10 }, labelGap{ 14 };
+inline constexpr Px dayGap{ 6 }, dayPadding{ 10 }, todayOutline{ 5 }, legendSwatch{ 26 };
+inline constexpr Px yearSquare{ 16 }, yearGap{ 3 };
+inline constexpr Px rowHeight{ 156 }, progressWidth{ 250 }, progressHeight{ 16 };
+inline constexpr Px sessionHeight{ 85 }, chartInset{ 74 };
+inline constexpr Px badgeSize{ 100 }, badgeRule{ 3 };
+inline constexpr Px milestoneTop{ 20 }, milestoneGap{ 16 }, milestoneBottom{ 28 },
+        milestoneRow{ 150 }, milestoneRowGap{ 32 };
+inline constexpr Px lineWidth{ 5 }, dotRadius{ 8 };
+} // namespace activity
 
 namespace list {
 // Section strips keep the status strip's standard height.
@@ -376,8 +397,15 @@ inline constexpr TextPx noticeText{ 24 };
 } // namespace acknowledgments
 
 namespace selection {
-inline constexpr Px outline{ 2 }, handleRadius{ 14 }, handleHitRadius{ 32 };
-}
+// A handle drag starts within handleHitRadius of the drawn dot, about 8 mm
+// across. Over the selection menu card only the dot itself starts a drag.
+// A held handle grows, so the finger sees what it moves.
+inline constexpr Px outline{ 2 }, handleRadius{ 18 }, handlePressedRadius{ 24 },
+        handleHitRadius{ 48 };
+// The selection menu reopens this long after a handle is released, unless a
+// handle is pressed again first.
+inline constexpr int reopenMilliseconds = 1500;
+} // namespace selection
 
 namespace input {
 // A long press on controls, lists and the library. Word lookup in the reader

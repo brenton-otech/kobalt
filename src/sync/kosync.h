@@ -18,11 +18,14 @@ namespace kobalt::kosync {
 QByteArray documentDigest(QIODevice &file);
 QByteArray filenameDigest(const QString &path);
 QUrl serverUrl(const QString &text);
-bool validLogin(const QString &server, const QString &username, const QString &password);
+QString loginError(const QString &server, const QString &username, const QString &password);
 // Pauses automatic syncs for the whole process, so a performance run never
 // reaches the network. The saved setting and manual syncs are unchanged.
 void pauseAutomatic(bool paused);
 bool automaticPaused();
+// GUI thread only. Includes DNS, retries, transfers and recent completions.
+// Native idle handling must not remove a connection that KOSync is using.
+bool networkInUse(int idleMilliseconds);
 // For the scenario player: clients created afterwards use this account
 // instead of the saved one and never write it. An empty object restores the
 // saved account. Call on the GUI thread.
@@ -65,6 +68,8 @@ public:
     }
 
     Progress candidate() const { return pending_; }
+
+    QJsonObject deferredBaseline() const;
 
     void keepLocal()
     {
@@ -141,7 +146,7 @@ public:
     bool setManualExplanation(bool enabled);
     bool logout();
 
-    QDateTime lastSync() const { return lastSync_; }
+    QDateTime lastSync() const;
 
     bool recordSyncSuccess();
     // Sleep and closing checkpoint the informational timestamp without
@@ -151,6 +156,7 @@ public:
     // for a sync that ends while the reader sleeps. The time stays unconfirmed
     // until the next persistSyncTime(), which then only reads the file.
     void queueSyncTime();
+    QJsonObject deferredAccount() const;
     void cancel();
     void pull(const QByteArray &document, std::function<void(Progress, QString)> done,
               bool retryTransient = true);

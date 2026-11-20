@@ -3,6 +3,8 @@
 #include "bookmark_store.h"
 #include "support/diagnostics.h"
 #include <QDateTime>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QDir>
 #include <QHash>
 #include <QFile>
@@ -14,6 +16,8 @@
 #include <QVariant>
 #include <QSet>
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <mutex>
 #include <utility>
 #include <cerrno>
@@ -56,6 +60,7 @@ ReadingHistory::ReadingHistory(QString directory, QString identity, QByteArray f
       author(bounded(std::move(author))),
       fingerprint(std::move(fingerprint)),
       utc(utc ? std::move(utc) : UtcClock([] { return QDateTime::currentMSecsSinceEpoch(); })),
+      opening(QUuid::createUuid().toString()),
       saved(std::make_shared<Saved>())
 {
 }
@@ -64,13 +69,24 @@ ReadingHistory::~ReadingHistory() = default;
 
 void ReadingHistory::start(qint64 activeMilliseconds, const QString &position)
 {
-    paused = false;
-    if (!pending.isEmpty() && pending.last().status == "active")
+    if (!pending.isEmpty() && pending.last().status == "active") {
+        if (paused)
+            dayBaseline = activeMilliseconds;
+        paused = false;
         return;
+    }
+    paused = false;
+    dayBaseline = activeMilliseconds;
     baseline = activeMilliseconds;
     const auto now = qMax<qint64>(0, utc());
-    pending.append({ QUuid::createUuid().toString(), bounded(position), bounded(position), "active",
-                     now, now, 0 });
+    pending.append({ QUuid::createUuid().toString(),
+                     bounded(position),
+                     bounded(position),
+                     "active",
+                     now,
+                     now,
+                     0,
+                     {} });
     dirty = true;
     ++generation;
 }
@@ -79,6 +95,7 @@ void ReadingHistory::update(qint64 activeMilliseconds, const QString &position)
 {
     if (paused || pending.isEmpty() || pending.last().status != "active")
         return;
+    countDays(activeMilliseconds);
     auto &interval = pending.last();
     interval.milliseconds =
             qMax(interval.milliseconds,
@@ -106,6 +123,31 @@ void ReadingHistory::pause(qint64 activeMilliseconds, const QString &position)
         return;
     update(activeMilliseconds, position);
     paused = true;
+}
+
+QString ReadingHistory::day() const
+{
+    return QDateTime::fromMSecsSinceEpoch(utc()).date().toString(Qt::ISODate);
+}
+
+void ReadingHistory::countDays(qint64 activeMilliseconds)
+{
+    const qint64 elapsed = qMax<qint64>(0, activeMilliseconds - dayBaseline);
+    dayBaseline = qMax(dayBaseline, activeMilliseconds);
+    const qint64 end = qMax<qint64>(0, utc());
+    // start() resets the active baseline on wake, so a retained session never
+    // distributes reading time across a sleep.
+    qint64 cursor = end - elapsed;
+    while (cursor < end) {
+        const auto local = QDateTime::fromMSecsSinceEpoch(cursor);
+        const auto date = local.date().toString(Qt::ISODate);
+        const auto time = local.time();
+        const qint64 untilHour = (60 - time.minute()) * 60000 - time.second() * 1000 - time.msec();
+        const qint64 stop = cursor + qMin(end - cursor, untilHour);
+        days[date] += stop - cursor;
+        pending.last().hours[date][time.hour()] += stop - cursor;
+        cursor = stop;
+    }
 }
 
 bool ReadingHistory::saving() const
@@ -151,7 +193,6 @@ bool ReadingHistory::save(bool background)
         return true;
     if (!writer)
         writer = std::make_unique<storage::RecordWriter>();
-    posted = generation;
     const auto pending = snapshot();
     auto write = [directory = directory, pending] {
         bool ok = false;
@@ -164,9 +205,11 @@ bool ReadingHistory::save(bool background)
     };
     if (background) {
         writer->post(std::move(write), {});
+        posted = generation;
         return true;
     }
     const bool ok = writer->writeNow(std::move(write));
+    posted = generation;
     acknowledge();
     return ok;
 }
@@ -178,7 +221,8 @@ ReadingHistory::Snapshot ReadingHistory::snapshot()
     const auto version = generation;
     return {
         [book = book, identity = identity, fingerprint = fingerprint, sourceKey = sourceKey,
-         title = title, author = author, snapshot = intervals](QSqlDatabase &db) {
+         title = title, author = author, snapshot = intervals, days = days,
+         opening = opening](QSqlDatabase &db) {
             if (book.isEmpty())
                 return false;
             for (const auto &interval : snapshot) {
@@ -216,6 +260,54 @@ ReadingHistory::Snapshot ReadingHistory::snapshot()
                 update.addBindValue(interval.observed);
                 update.addBindValue(utf8(interval.status));
                 if (!update.exec() || update.numRowsAffected() != 1)
+                    return false;
+                for (auto day = interval.hours.cbegin(); day != interval.hours.cend(); ++day) {
+                    QJsonObject hours;
+                    for (auto hour = day.value().cbegin(); hour != day.value().cend(); ++hour)
+                        hours.insert(QString::number(hour.key()), double(hour.value()));
+                    const QString name = "reading-hours:" + interval.id + ':' + day.key();
+                    const auto bytes = QJsonDocument(hours).toJson(QJsonDocument::Compact);
+                    QSqlQuery write(db);
+                    write.prepare(
+                            "INSERT OR REPLACE INTO profile_state(name,format,revision,payload) "
+                            "SELECT ?,1,0,CAST(? AS TEXT) WHERE NOT EXISTS "
+                            "(SELECT 1 FROM profile_state WHERE name=? AND payload=CAST(? AS TEXT))");
+                    write.addBindValue(name);
+                    write.addBindValue(bytes);
+                    write.addBindValue(name);
+                    write.addBindValue(bytes);
+                    if (!write.exec())
+                        return false;
+                }
+            }
+            for (auto day = days.cbegin(); day != days.cend(); ++day) {
+                const QString name = "reading-day:" + day.key() + ':' + opening;
+                QSqlQuery read(db);
+                read.prepare(
+                        "SELECT format,CASE WHEN length(CAST(payload AS BLOB))<=16384 THEN payload END FROM profile_state WHERE name=?");
+                read.addBindValue(name);
+                if (!read.exec())
+                    return false;
+                QJsonObject payload;
+                if (read.next()) {
+                    const auto document = QJsonDocument::fromJson(read.value(1).toByteArray());
+                    if (read.value(0).toInt() != 1 || !document.isObject())
+                        return false;
+                    payload = document.object();
+                    if (payload.value("milliseconds").toDouble(-1) == day.value())
+                        continue;
+                }
+                payload["book"] = book;
+                payload["milliseconds"] = double(day.value());
+                const auto bytes = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+                if (bytes.size() > 16384)
+                    return false;
+                QSqlQuery write(db);
+                write.prepare("INSERT OR REPLACE INTO profile_state(name,format,revision,payload) "
+                              "VALUES(?,1,0,CAST(? AS TEXT))");
+                write.addBindValue(name);
+                write.addBindValue(bytes);
+                if (!write.exec())
                     return false;
             }
             return true;
@@ -310,20 +402,35 @@ bool ReadingHistory::recover(const QString &directory)
         return query.exec("UPDATE reading_sessions SET status='interrupted' WHERE status='active'");
     });
 }
-qint64 ReadingHistory::finishedSince(const QString &directory, qint64 utcStart)
+
+qint64 ReadingHistory::dayTotal(const QString &directory, const QString &day,
+                                const QString &excludeOpening)
 {
-    qint64 total = -1;
+    qint64 total = 0;
     const bool ok = storage::profileTransaction(directory, [&](QSqlDatabase &db) {
+        const QString prefix = "reading-day:" + day + ':';
         QSqlQuery query(db);
-        if (!query.prepare("SELECT coalesce(sum(active_ms),0) FROM reading_sessions "
-                           "WHERE started>=? AND status!='active'"))
+        query.prepare(
+                "SELECT name,format,CASE WHEN length(CAST(payload AS BLOB))<=16384 THEN payload END FROM profile_state WHERE name>=? AND name<?");
+        query.addBindValue(prefix);
+        query.addBindValue(prefix + QChar(0xffff));
+        if (!query.exec())
             return false;
-        query.addBindValue(utcStart);
-        if (!query.exec() || !query.next())
-            return false;
-        total = query.value(0).toLongLong();
+        while (query.next()) {
+            if (query.value(0).toString() == prefix + excludeOpening)
+                continue;
+            const auto document = QJsonDocument::fromJson(query.value(2).toByteArray());
+            const double milliseconds = document.object().value("milliseconds").toDouble(-1);
+            if (query.value(1).toInt() != 1 || !document.isObject() || !std::isfinite(milliseconds)
+                || milliseconds < 0 || milliseconds > 9007199254740991.0
+                || milliseconds != std::floor(milliseconds)
+                || total > std::numeric_limits<qint64>::max() - qint64(milliseconds))
+                return false;
+            total += qint64(milliseconds);
+        }
         return true;
     });
     return ok ? total : -1;
 }
+
 } // namespace kobalt

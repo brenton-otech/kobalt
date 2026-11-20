@@ -1,4 +1,5 @@
 #include "highlight_session.h"
+#include "engine/engine_activity.h"
 #include "support/save_wait.h"
 #include "reader_session.h"
 #include "support/diagnostics.h"
@@ -160,7 +161,7 @@ bool HighlightSession::resolved() const
 
 BookmarkLocations HighlightSession::locations() const
 {
-    return resolved() ? BookmarkLocations{ pages_, order_ } : BookmarkLocations{};
+    return resolved() ? BookmarkLocations{ pages_, order_, bookPages_, {} } : BookmarkLocations{};
 }
 
 int HighlightSession::page(int index) const
@@ -189,6 +190,7 @@ bool HighlightSession::sync()
         layoutRevision_ = revision;
         pages_.clear();
         order_.clear();
+        bookPages_.clear();
         return true;
     }
     if (lookup_ == key && lookupRevision_ == revision && lookupGeneration_ == rangesGeneration_) {
@@ -221,6 +223,7 @@ bool HighlightSession::sync()
                     guard->layoutRevision_ = revision;
                     guard->pages_ = std::move(locations.pages);
                     guard->order_ = std::move(locations.order);
+                    guard->bookPages_ = std::move(locations.bookPages);
                 }
                 if (guard->changed) {
                     guard->changed();
@@ -294,10 +297,14 @@ void HighlightSession::finishSave(quint64 id, bool ok, const QString &error, qui
         store_->dropDetails();
         retryPending_ = false;
         retryHighlights_.clear();
+        beforeEditorWrite_.clear();
+        if (saved)
+            saved();
         return;
     }
-    retryHighlights_ = highlights;
-    retryPending_ = true;
+    retryHighlights_ = id == editorWrite_ ? beforeEditorWrite_ : highlights;
+    retryPending_ = id != editorWrite_ || !beforeEditorWrite_.isEmpty();
+    beforeEditorWrite_.clear();
     error_ = error;
     ++errors_;
     known_.clear();
@@ -334,7 +341,7 @@ void HighlightSession::remember(const QVector<Highlight> &highlights)
     QHash<QString, HighlightExcerpt> kept;
     for (const auto &h : highlights) {
         if (h.detailsLoaded)
-            kept.insert(h.id, { h.id, h.text, h.chapter });
+            kept.insert(h.id, { h.id, h.text, h.chapter, h.note });
         else if (known_.contains(h.id))
             kept.insert(h.id, known_.value(h.id));
     }
@@ -421,6 +428,11 @@ void HighlightSession::save(const QString &start, const QString &end, const QStr
         }
         return;
     }
+    const auto drain = std::make_shared<EngineDrain>();
+    finished = [drain, done = std::move(finished)](bool saved) {
+        if (done)
+            done(saved);
+    };
     QPointer<HighlightSession> guard(this);
     const auto generation = generation_;
     const auto revision = session_.layoutRevision();
@@ -501,10 +513,11 @@ void HighlightSession::save(const QString &start, const QString &end, const QStr
                             }
                             // Chapter lookup follows the start endpoint, even after a cross-page selection.
                             const auto positions = QStringList{ h.start };
-                            guard->session_.bookmarkPages(
+                            guard->session_.bookmarkLocations(
                                     positions,
                                     [guard, list, h, index, generation, revision,
-                                     finished](QVector<int> pages) mutable {
+                                     finished](BookmarkLocations locations) mutable {
+                                        const auto &pages = locations.bookPages;
                                         if (!guard) {
                                             return;
                                         }
@@ -515,11 +528,9 @@ void HighlightSession::save(const QString &start, const QString &end, const QStr
                                             }
                                             return;
                                         }
-                                        for (const auto &chapter : guard->session_.chapters()) {
-                                            if (chapter.page >= 0 && chapter.page <= pages[0]) {
-                                                h.chapter = chapter.title.left(512);
-                                            }
-                                        }
+                                        const auto chapter = locations.chapters.value(0);
+                                        if (!chapter.isEmpty())
+                                            h.chapter = chapter.left(512);
                                         if (index < 0) {
                                             list.append(h);
                                         } else {
@@ -530,7 +541,8 @@ void HighlightSession::save(const QString &start, const QString &end, const QStr
                                         if (finished) {
                                             finished(saved);
                                         }
-                                    });
+                                    },
+                                    false, false);
                         });
             });
 }
@@ -569,6 +581,46 @@ bool HighlightSession::updateAppearance(const QString &id, const QString &color,
         h.color = chosenColor;
         h.style = chosenStyle;
         return persist(std::move(list));
+    }
+    return false;
+}
+
+bool HighlightSession::setNote(const QString &id, const QString &note, bool editorOwnsRetry)
+{
+    const QString value = note.trimmed().isEmpty() ? QString() : note;
+    if (value.size() > HighlightStore::maxNoteUnits) {
+        error_ = QStringLiteral("note-too-long");
+        ++errors_;
+        if (failed)
+            failed();
+        return false;
+    }
+    Highlight full;
+    if (!detail(id, &full))
+        return false;
+    auto list = highlights();
+    for (auto &h : list) {
+        if (h.id != id)
+            continue;
+        if (full.note == value && writable()) {
+            error_.clear();
+            return true;
+        }
+        // A compact row needs its text and chapter to save a changed note.
+        h.text = full.text;
+        h.chapter = full.chapter;
+        h.note = value;
+        h.detailsLoaded = true;
+        QVector<Highlight> preceding;
+        if (editorOwnsRetry)
+            preceding = saving() ? highlights() : retryHighlights_;
+        if (!persist(std::move(list)))
+            return false;
+        if (editorOwnsRetry) {
+            editorWrite_ = posted_;
+            beforeEditorWrite_ = preceding;
+        }
+        return true;
     }
     return false;
 }

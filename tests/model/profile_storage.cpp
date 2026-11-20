@@ -4,6 +4,7 @@
 #include "storage/reading_history.h"
 #include "storage/bookmark_store.h"
 #include "reading/sleep_screen.h"
+#include "reading/rendering_mode.h"
 #ifndef KOBALT_TEST_NO_LIBRARY
 #  include "library/library_index.h"
 #endif
@@ -12,6 +13,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QJsonArray>
 #include <QSqlQuery>
 #include <QSqlDatabase>
@@ -88,6 +90,23 @@ int main(int argc, char **argv)
     QTemporaryDir root;
     require(root.isValid(), "Temporary profile");
     {
+        QTemporaryDir usbRoot;
+        require(usbRoot.isValid(), "Temporary USB profile");
+        const storage::Paths paths{ usbRoot.path() };
+        storage::closeProfile(true);
+        storage::closeProfile();
+        require(!storage::drainWriterThread(), "Closing an unused profile started the worker");
+        QString error;
+        const auto transaction = [](QSqlDatabase &) { return true; };
+        require(!storage::profileTransaction(paths.directory, transaction, &error)
+                        && error == "storage-unavailable" && !QFileInfo::exists(paths.database()),
+                "First database use during USB export accessed the profile");
+        storage::reopenProfile();
+        require(storage::profileTransaction(paths.directory, transaction, &error),
+                "First database use after USB disconnect failed");
+        storage::closeProfile();
+    }
+    {
         QTemporaryDir batchRoot;
         const storage::Paths batch{ batchRoot.path() };
         const QJsonObject oldBook{ { "schema", 1 },
@@ -153,6 +172,13 @@ int main(int argc, char **argv)
         storage::closeProfile();
     }
     const storage::Paths paths{ root.path() };
+    require(paths.documentCache() == root.path() + "/.cache-blaze"
+                    && storage::Paths{}.documentCache().isEmpty(),
+            "Blaze cache has its own profile namespace");
+    const auto beta8Cache = root.path() + "/.cache";
+    require(QDir().mkpath(beta8Cache), "Beta 8 cache directory");
+    const auto beta8Entry = beta8Cache + "/book.cr3";
+    write(beta8Entry, "beta8-cache-sentinel");
     const QString identity = "file:///books/invented.epub";
     QJsonObject state;
     state["schema"] = 1;
@@ -167,7 +193,18 @@ int main(int argc, char **argv)
     state["null"] = QJsonValue();
     require(storage::writeJson(paths.bookState(identity), state), "Legacy book fixture");
     const auto original = bytes(paths.bookState(identity));
+    require(QDir().mkpath(paths.previews()), "Legacy preview directory");
+    const auto legacyPreview = paths.previews() + '/' + QString(64, 'a') + ".png";
+    QImage preview(16, 16, QImage::Format_RGB32);
+    preview.fill(Qt::white);
+    require(preview.save(legacyPreview, "PNG"), "Legacy preview fixture");
     require(storage::prepareProfile(paths), "Import complete profile");
+    require(QDir().mkpath(paths.documentCache()), "Blaze cache directory");
+    write(paths.documentCache() + "/book.cr3", "blaze-cache-sentinel");
+    require(QDir(paths.documentCache()).removeRecursively()
+                    && bytes(beta8Entry) == "beta8-cache-sentinel",
+            "Profile preparation and Blaze cache clearing preserve beta 8 cache");
+    require(!QFile::exists(legacyPreview), "Profile preparation left a legacy preview");
     require(storage::readBookState(paths, identity).object == state, "Imported state changed");
     const auto backup =
             root.path() + "/migration-backup/" + QFileInfo(paths.bookState(identity)).fileName();
@@ -260,6 +297,20 @@ int main(int argc, char **argv)
             "Settings cleanup lost intent");
     require(storage::readJson(paths.preferences()) == clean.object,
             "Clean settings were not persisted");
+    const auto known = qt::object({ { "old", true }, { "choice", 1 } });
+    auto withNewField = known;
+    withNewField["future"] = 7;
+    auto savedPreferences = clean.object;
+    savedPreferences["private_optional"] = withNewField;
+    require(storage::writePreferences(paths.preferences(), savedPreferences)
+                    && storage::updatePreferences(
+                            paths.preferences(), qt::object({ { "private_optional", known } }),
+                            qt::object(
+                                    { { "private_optional", qt::object({ { "choice", 2 } }) } })),
+            "Apply an edit based on earlier settings");
+    require(storage::readJson(paths.preferences()).value("private_optional").toObject()
+                    == qt::object({ { "choice", 2 }, { "future", 7 } }),
+            "Editing an older settings snapshot lost a new field or restored a removed one");
     // Until beta 7 the Wi-Fi power saver setting is never saved, and reading
     // the settings removes a saved one.
     require(storage::writePreferences(paths.preferences(),
@@ -272,6 +323,36 @@ int main(int argc, char **argv)
     require(!storage::readPreferences(paths.preferences()).object.contains("turn_off_wifi_on_open")
                     && !storage::readJson(paths.preferences()).contains("turn_off_wifi_on_open"),
             "Saved Wi-Fi power saver setting was not removed");
+    // Rendering: a file from an older build has no choice and opens as Fast.
+    // A saved choice survives the round trip with the other preferences.
+    require(storage::writeJson(paths.preferences(),
+                               qt::object({ { "schema", 1 }, { "dark_mode", true } })),
+            "Rendering fixture");
+    const auto older = storage::readPreferences(paths.preferences());
+    require(older.status == ReadStatus::Ok && !older.object.contains(renderingMode::preferenceKey)
+                    && renderingMode::fromPreferences(older.object) == renderingMode::Mode::Hybrid,
+            "Preferences without Rendering did not use Hybrid");
+    for (const auto mode : { renderingMode::Mode::Accurate, renderingMode::Mode::Fast,
+                             renderingMode::Mode::Hybrid }) {
+        auto next = older.object;
+        next[renderingMode::preferenceKey] = renderingMode::value(mode);
+        require(storage::writePreferences(paths.preferences(), next),
+                "Rendering choice was not saved");
+        const auto saved = storage::readPreferences(paths.preferences()).object;
+        // A saved Fast opens as Hybrid: Settings does not offer it for now.
+        const auto opens = mode == renderingMode::Mode::Fast ? renderingMode::Mode::Hybrid : mode;
+        require(renderingMode::fromPreferences(saved) == opens
+                        && saved.value(renderingMode::preferenceKey).toString()
+                                == renderingMode::value(mode)
+                        && saved.value("dark_mode") == true,
+                "Rendering choice did not round-trip with the other preferences");
+    }
+    require(storage::writeJson(paths.preferences(),
+                               qt::object({ { "schema", 1 }, { "rendering_mode", "chapter" } })),
+            "Invalid rendering fixture");
+    require(!storage::readPreferences(paths.preferences())
+                     .object.contains(renderingMode::preferenceKey),
+            "Invalid Rendering value was kept");
     write(paths.preferences(), "{\"schema\":99,\"new_option\":true}");
     const auto settingsBytes = bytes(paths.preferences());
     require(storage::readPreferences(paths.preferences()).status == ReadStatus::Unsupported

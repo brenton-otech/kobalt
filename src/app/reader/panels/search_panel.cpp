@@ -18,6 +18,7 @@
 #include <QGridLayout>
 #include <QIntValidator>
 #include <QLocale>
+#include <algorithm>
 
 namespace kobalt {
 namespace metrics = ui::metrics;
@@ -56,7 +57,8 @@ private:
 };
 } // namespace
 
-SearchPanel::SearchPanel(QWidget *parent, KeyboardFactory makeKeyboard) : ui::Panel(parent)
+SearchPanel::SearchPanel(QWidget *parent, KeyboardFactory makeKeyboard)
+    : ui::Panel(parent), keyboardFactory(std::move(makeKeyboard))
 {
     setObjectName("rrSearch");
     back = new ui::CellButton(ui::ControlIcon::Back, this, chrome::backIcon);
@@ -89,10 +91,6 @@ SearchPanel::SearchPanel(QWidget *parent, KeyboardFactory makeKeyboard) : ui::Pa
             [this](const QString &text) { clear->setVisible(!text.isEmpty()); });
     query->setAccessibleName(strings::get("reader.search_book"));
     query->setInputMethodHints(Qt::ImhNoPredictiveText | Qt::ImhNoAutoUppercase);
-    keyboard = makeKeyboard(this, query);
-    Q_ASSERT(keyboard);
-    keyboard->setSubmitText(strings::get("search_panel.search"));
-    keyboard->submitted = [this] { run(); };
     submit = new ui::CellButton(ui::ControlIcon::Search, this, chrome::backIcon);
     submit->setObjectName("rrSearchSubmit");
     submit->setRule(Qt::LeftEdge);
@@ -389,6 +387,12 @@ void SearchPanel::choosePage()
 
 void SearchPanel::open(bool returnAvailable, int originalPage, const QString &initialQuery)
 {
+    if (!keyboard) {
+        keyboard = keyboardFactory(this, query);
+        Q_ASSERT(keyboard);
+        keyboard->setSubmitText(strings::get("search_panel.search"));
+        keyboard->submitted = [this] { run(); };
+    }
     if (!initialQuery.isEmpty()) {
         query->setText(initialQuery);
         // The dictionary action explicitly asks to search the book.
@@ -461,6 +465,13 @@ QFont SearchPanel::excerptFont() const
 
 QString SearchPanel::caption(const SearchHit &hit) const
 {
+    // In chapter mode a hit names its chapter, with an estimated page once
+    // there is one.
+    if (!hit.chapter.isEmpty())
+        return hit.page < 0 ? hit.chapter.simplified()
+                            : strings::get("search_panel.page_chapter")
+                                      .arg(hit.page + 1)
+                                      .arg(hit.chapter.simplified());
     // The chapter that starts last at or before the hit's page contains it.
     QString title;
     int start = -1;
@@ -543,7 +554,8 @@ void SearchPanel::stop()
     closePopup();
     updates.stop();
     ui::clearQueryFocus(query);
-    keyboard->hide();
+    if (keyboard)
+        keyboard->hide();
     QGuiApplication::inputMethod()->hide();
     restartOnOpen = restartOnOpen || scanning;
     if (scanning)
@@ -555,7 +567,8 @@ void SearchPanel::resizeEvent(QResizeEvent *)
 {
     closePopup();
     redraw();
-    keyboard->place();
+    if (keyboard)
+        keyboard->place();
 }
 
 void SearchPanel::paintEvent(QPaintEvent *event)
@@ -689,7 +702,10 @@ void SearchPanel::redraw()
         visibleFirst = firstVisible;
         visibleCount = countVisible;
         const auto requestedHits = hits.mid(firstVisible, countVisible);
-        if (countVisible && detailsRequested && requestedHits.first().page < 0) {
+        const bool needsDetails =
+                std::any_of(requestedHits.cbegin(), requestedHits.cend(),
+                            [](const SearchHit &hit) { return hit.text.isEmpty(); });
+        if (countVisible && detailsRequested && needsDetails) {
             const auto epoch = detailsEpoch;
             QPointer<SearchPanel> guard(this);
             detailsRequested(requestedHits, [guard, epoch](QVector<SearchHit> resolved) {
@@ -711,7 +727,9 @@ void SearchPanel::redraw()
             continue;
         buttons[row]->setObjectName(QString("rrSearchResult%1").arg(index));
         buttons[row]->setGeometry(0, listTop + row * rowHeight, width(), rowHeight);
-        const bool ready = row < visibleHits.size() && visibleHits[row].page >= 0;
+        // An estimated page label can arrive before the excerpt, and a
+        // resolved excerpt can be opened before its book page is known.
+        const bool ready = row < visibleHits.size() && !visibleHits[row].text.isEmpty();
         buttons[row]->setEnabled(ready);
         if (!ready) {
             metadata[row]->clear();
@@ -774,7 +792,10 @@ void SearchPanel::redraw()
         }
         labels[row]->setText(excerpt());
         buttons[row]->setAccessibleName(
-                strings::get("search_panel.page_detail").arg(hit.page + 1).arg(hit.text));
+                hit.page >= 0 || hit.chapter.isEmpty()
+                        ? strings::get("search_panel.page_detail").arg(hit.page + 1).arg(hit.text)
+                        : strings::get("search_panel.chapter_detail")
+                                  .arg(hit.chapter.simplified(), hit.text));
     }
 }
 } // namespace kobalt

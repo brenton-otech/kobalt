@@ -135,7 +135,7 @@ ReaderHostServices readerServices(std::shared_ptr<Device> device) {
     result.dictionary = [] {
         return std::make_unique<Dictionary>();
     };
-    result.keyboard = [](QWidget *parent, QLineEdit *editor) {
+    result.keyboard = [](QWidget *parent, QWidget *editor) {
         return ui::makeWidgetKeyboard(parent, editor);
     };
     result.presentation = [device](QWidget *) {

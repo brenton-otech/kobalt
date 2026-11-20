@@ -154,6 +154,7 @@ void StartScreen::showLibrary()
     applyTextSize();
     buildLibrary();
     setCurrentWidget(canvas);
+    releaseOpening();
     fitLibrary();
     view->setScanning(store.scanning(), store.found());
     view->refresh();
@@ -252,12 +253,7 @@ StartScreen::~StartScreen()
 
 void StartScreen::showOpening(const QString &bookKey, bool showCover)
 {
-    // Recreate the view to reset progress and the delayed hint for each book.
-    if (openingSurface) {
-        removeWidget(openingSurface);
-        opening.reset();
-        delete openingSurface;
-    }
+    releaseOpening();
     openingSurface = new WidgetCanvas(this);
     openingSurface->setObjectName("androidOpeningCanvas");
     // A parentless QDialog can become a native Android window before proxy
@@ -275,6 +271,16 @@ void StartScreen::showOpening(const QString &bookKey, bool showCover)
     addWidget(openingSurface);
     setCurrentWidget(openingSurface);
     openingSurface->fitContent();
+}
+
+void StartScreen::releaseOpening()
+{
+    if (!openingSurface)
+        return;
+    removeWidget(openingSurface);
+    opening.reset();
+    delete openingSurface;
+    openingSurface = nullptr;
 }
 
 void StartScreen::setCover(QImage cover)

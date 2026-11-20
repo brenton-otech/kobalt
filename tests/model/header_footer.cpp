@@ -219,6 +219,37 @@ int main()
     missingChapter.chapter.clear();
     require(content(Field::ChapterAndPage, missingChapter, false).text == QStringLiteral("6 of 20"),
             "An empty chapter left a separator before its page count");
+    // An estimated total shows with a mark; a counted one is plain.
+    auto estimated = values;
+    estimated.pagesEstimated = estimated.chapterPagesEstimated = true;
+    require(content(Field::ChapterPage, estimated, false).text == QStringLiteral("6 / ~20")
+                    && content(Field::BookPage, estimated, false).text
+                            == QStringLiteral("%1 / ~193").arg(values.page)
+                    && content(Field::ChapterAndPage, missingChapter, false).text
+                            == QStringLiteral("6 of 20"),
+            "An estimated total needs its mark");
+    estimated.chapter.clear();
+    // Before the estimate there are no page numbers. The page fields say so
+    // and show no percentage in their place; the percentage fields keep theirs.
+    auto noPages = values;
+    noPages.page = noPages.pages = noPages.chapterPage = noPages.chapterPages = 0;
+    noPages.percentTenths = 427;
+    noPages.chapterPercentTenths = 309;
+    const auto calculating = strings::get("header_footer.calculating");
+    for (const auto field : { Field::ChapterPage, Field::BookPage, Field::ChapterPagesLeft })
+        require(content(field, noPages, false).text == calculating,
+                "A page field without page numbers must show that they are being calculated");
+    require(content(Field::BookPercent, noPages, false).text == QStringLiteral("42%")
+                    && content(Field::ChapterPercent, noPages, false).text
+                            == QStringLiteral("30%"),
+            "The percentage fields keep their percentage");
+    noPages.decimalPercentages = true;
+    require(content(Field::BookPercent, noPages, false).text == QStringLiteral("42.7%")
+                    && content(Field::ChapterPercent, noPages, false).text
+                            == QStringLiteral("30.9%"),
+            "Chapter mode lost decimal precision before estimates arrived");
+    require(content(Field::ChapterAndPage, estimated, false).text == QStringLiteral("6 of ~20"),
+            "An estimated total beside a name needs its mark");
     auto missingTotal = values;
     missingTotal.chapterPages = 0;
     require(content(Field::ChapterAndPage, missingTotal, false).chapterPosition.isEmpty()
@@ -294,6 +325,48 @@ int main()
             require(content(field, sample, false).empty() == (percent != 0),
                     "Unknown battery must be hidden while a valid zero remains visible");
     }
+    {
+        auto decimal = values;
+        decimal.decimalPercentages = true;
+        decimal.pages = 1000;
+        decimal.chapterPages = 1000;
+        for (const int page : { 0, 1, 80, 81, 999, 1000, 1001 }) {
+            decimal.page = decimal.chapterPage = page;
+            const int tenths = qBound(1, page, 1000);
+            const auto expected = QString("%1.%2%").arg(tenths / 10).arg(tenths % 10);
+            require(content(Field::BookPercent, decimal, false).text == expected
+                            && content(Field::ChapterPercent, decimal, true).text == expected,
+                    "Decimal progress lost a small session or a page boundary");
+        }
+        for (const int pages : { 1, 3, 83, 1000000, 2147483647 }) {
+            decimal.pages = pages;
+            decimal.page = pages;
+            require(content(Field::BookPercent, decimal, false).text == "100.0%",
+                    "Decimal progress lost the last page");
+            if (pages > 1) {
+                --decimal.page;
+                require(content(Field::BookPercent, decimal, false).text != "100.0%",
+                        "Decimal progress rounded up before the last page");
+            }
+        }
+        decimal.pages = 83;
+        decimal.page = 1;
+        require(content(Field::BookPercent, decimal, false).text == "1.2%",
+                "Decimal progress changed the current-page accounting");
+        decimal.page = 82;
+        require(content(Field::BookPercent, decimal, false).text == "98.7%",
+                "Decimal progress did not round down");
+        decimal = values;
+        decimal.decimalPercentages = true;
+        for (const auto field : fields)
+            if (field != Field::BookPercent && field != Field::ChapterPercent)
+                require(content(field, decimal, false) == content(field, values, false),
+                        "Progress precision changed a battery, time or combined page field");
+        decimal.pages = decimal.chapterPages = 0;
+        require(content(Field::BookPercent, decimal, false).empty()
+                        && content(Field::ChapterPercent, decimal, false).empty(),
+                "Unknown lengths showed decimal progress");
+    }
     // Battery warning shows the battery only below its threshold.
     require(content(Field::BatteryWarning, values, false).empty(), "Battery warning showed at 80%");
     {
@@ -312,7 +385,7 @@ int main()
     for (const auto field : fields)
         require(fieldDescription(field).isEmpty()
                         == (field != Field::BatteryWarning && field != Field::ChapterTimeLeft
-                            && field != Field::BookTimeLeft),
+                            && field != Field::BookTimeLeft && field != Field::BookStatus),
                 "A field has the wrong description");
     // Every field is offered, each once.
     for (const auto field : fields)
@@ -389,6 +462,84 @@ int main()
             "The battery showed on a host without device status");
     require(content(Field::Time, values, false).text == values.time,
             "The time hid with device status");
+    // The performance times show milliseconds, or nothing while unknown.
+    require(content(Field::PageTurnTime, values, false).empty()
+                    && content(Field::ChapterLoadTime, values, false).empty(),
+            "An unknown time showed a value");
+    values.pageTurnMilliseconds = 12;
+    values.chapterLoadMilliseconds = 0;
+    require(content(Field::PageTurnTime, values, false).text == QStringLiteral("12 ms")
+                    && content(Field::ChapterLoadTime, values, false).text
+                            == QStringLiteral("0 ms"),
+            "A performance time is wrong");
+    require(std::end(choosableFields)[-3] == Field::PageTurnTime
+                    && std::end(choosableFields)[-2] == Field::ChapterLoadTime
+                    && std::end(choosableFields)[-1] == Field::BookStatus,
+            "The debug fields are not together at the end of the list");
+    // Book status: the last turn time, then fast with the layout's progress
+    // or failure, or full with the time the whole book took when it is known.
+    Values status;
+    require(content(Field::BookStatus, status, false).text == QStringLiteral("layout: fast"),
+            "Book status without a turn or progress is wrong");
+    status.wholeBookPercent = 37;
+    require(content(Field::BookStatus, status, false).text == QStringLiteral("layout: fast (37%)"),
+            "Book status does not show the layout's progress");
+    status.pageTurnMilliseconds = 22;
+    require(content(Field::BookStatus, status, false).text
+                    == QStringLiteral("turn: 22ms | layout: fast (37%)"),
+            "Book status does not lead with the turn time");
+    require(content(Field::BookStatus, status, true).text
+                    == QStringLiteral("TURN: 22MS | LAYOUT: FAST (37%)"),
+            "Book status does not follow the slot's capitals");
+    status.wholeBookFailed = true;
+    require(content(Field::BookStatus, status, false).text
+                    == QStringLiteral("turn: 22ms | layout: fast (failed)"),
+            "Book status does not show a failed build");
+    status = {};
+    status.wholeBook = true;
+    require(content(Field::BookStatus, status, false).text == QStringLiteral("layout: full"),
+            "Book status of a whole book is not full");
+    status.wholeBookMilliseconds = 9249;
+    require(content(Field::BookStatus, status, false).text == QStringLiteral("layout: full (9.2s)"),
+            "Book status does not show a short whole-book time with a decimal");
+    status.wholeBookMilliseconds = 55400;
+    require(content(Field::BookStatus, status, false).text == QStringLiteral("layout: full (55s)"),
+            "Book status does not show a long whole-book time in whole seconds");
+    require(!fieldDescription(Field::BookStatus).isEmpty()
+                    && field("book_status") == Field::BookStatus,
+            "Book status has no description or saved name");
+    auto timed = standard;
+    timed.slotFields[2] = Field::PageTurnTime;
+    timed.slotFields[4] = Field::ChapterLoadTime;
+    const auto timedJson = toJson(timed);
+    require(timedJson.value("top_right").toString() == QStringLiteral("page_turn_time")
+                    && timedJson.value("bottom_center").toString()
+                            == QStringLiteral("chapter_load_time")
+                    && fromJson(timedJson, standard) == timed,
+            "A layout with performance times did not round-trip");
+    // A build that does not know a field name leaves only that slot empty
+    // and keeps the rest of the layout. An older build reads this build's
+    // new names the same way.
+    auto unknown = timedJson;
+    unknown["top_right"] = QStringLiteral("a_later_field");
+    auto expected = timed;
+    expected.slotFields[2] = Field::Nothing;
+    require(fromJson(unknown, standard) == expected,
+            "An unknown field name changed more than its own slot");
+    // A layout saved before the performance times loads as it was.
+    const auto old = qt::object({ { "top_left", "time" },
+                                  { "top_center", "chapter" },
+                                  { "top_right", "nothing" },
+                                  { "bottom_left", "chapter_pages_left" },
+                                  { "bottom_center", "nothing" },
+                                  { "bottom_right", "book_percent" },
+                                  { "header_size", "small" },
+                                  { "footer_size", "small" },
+                                  { "uppercase", false },
+                                  { "progress_bar", false } });
+    auto oldLayout = standard;
+    oldLayout.uppercase.fill(false);
+    require(fromJson(old, standard) == oldLayout, "An old layout changed on load");
     for (int slot = 0; slot < slotCount; ++slot)
         require(!slotLabel(slot).isEmpty(), "A slot has no name");
     for (const auto field : fields)
