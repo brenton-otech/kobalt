@@ -131,7 +131,7 @@ The description includes the unofficial build label. The hooks are in
   writes `data/` (settings and reading progress) or `logs/`. It records the
   installed files in `/mnt/us/kobalt/kpm-installed.txt` and removes files
   that only an earlier package installed. It copies the `Kobalt.sh`
-  and `Kobalt-stop.sh` scriptlets to `documents/`.
+  scriptlet to `documents/`.
 - `uninstall.sh upgrade`, which KPM runs before an upgrade, keeps the app.
   A full uninstall removes only the recorded files, the directories they
   leave empty and each unchanged scriptlet. `data/`, `logs/` and any other
@@ -235,23 +235,34 @@ On a Mac, the Colorsoft's USB storage is reached over MTP, for example with
    `/`, `-`, `_` and spaces in arguments. It silently drops a command that
    contains `.` or `:`, so `;kpm install file:///…` returns to Home without
    running. See [KPM issue #5](https://github.com/KindleModding/KPM/issues/5).
-   Install over SSH, or copy a scriptlet such as `documents/Install Kobalt.sh`
-   that runs:
+   Install over SSH, or copy an **Install Kobalt** scriptlet to `documents/`
+   that installs exactly one package. It names the package file, checks its
+   SHA-256 with the firmware's `sha256sum`, refuses a missing or different
+   file, and appends everything to `kobalt/logs/install.log`:
 
    ```sh
    #!/bin/sh
-   /var/local/kmc/bin/kpm -y install file:///mnt/us/Kobalt-1.0-beta.9-kindle-colorsoft-r1.kpkg
+   # Name: Install Kobalt
+   PACKAGE=/mnt/us/Kobalt-1.0-beta.9-kindle-colorsoft-r2-<commit>.kpkg
+   SHA256=<sha256 of that file>
+   mkdir -p /mnt/us/kobalt/logs
+   {
+       date
+       [ -f "$PACKAGE" ] || { echo "Install refused: $PACKAGE is missing."; exit 1; }
+       actual=$(sha256sum "$PACKAGE" | cut -d' ' -f1)
+       [ "$actual" = "$SHA256" ] || { echo "Install refused: SHA-256 $actual differs."; exit 1; }
+       /var/local/kmc/bin/kpm -y install "file://$PACKAGE"
+       echo "exit=$?"
+   } >>/mnt/us/kobalt/logs/install.log 2>&1
    ```
 
-   Eject the Kindle, unplug it and open that scriptlet in the Library.
-   KPM shows its log on screen. The install hook ends with
-   `Kobalt installed. Open "Kobalt" in the Library to start it, or "Kobalt (stop stock UI)" to stop the stock UI instead of pausing it.`
+   Eject the Kindle, unplug it and open **Install Kobalt** in the Library. The
+   install log ends with `Kobalt installed. Open "Kobalt" in the Library to
+   start it.` and `exit=0`.
 3. Open **Kobalt** in the Library. It is the `documents/Kobalt.sh`
    scriptlet, and it runs `kpm launch kobalt`, which pauses the stock
-   interface while Kobalt runs, so Home returns almost at once on exit.
-   **Kobalt (stop stock UI)** (`documents/Kobalt-stop.sh`) runs
-   `kpm launch kobalt --stop-ui` instead, as a fallback. See
-   [Stock UI modes](kindle-maintenance.md#stock-ui-modes).
+   interface while Kobalt runs, so Home returns almost at once on exit. See
+   [Stock UI](kindle-maintenance.md#stock-ui).
 4. To leave, close any open book with the Library arrow. Then choose **Exit
    Kobalt** from the Library's three-dot menu. The stock interface returns.
 5. The installed package file is no longer needed. Delete

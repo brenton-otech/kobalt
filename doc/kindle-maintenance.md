@@ -74,62 +74,56 @@ historical firmware and hardware evidence. Their prototype filenames and
 checksums describe earlier builds, not the current Colorsoft candidate. Use the versioned
 artifacts from the current output for new installations.
 
-## Stock UI modes
+## Stock UI
 
-The launcher either stops the stock framework (`--stop-ui`) or pauses it
-(`--pause-ui`), as KOReader does by default. Every target uses the same
-`launcher/launch.sh` and `launcher/supervisor.sh`. Without a flag, the default
-comes from the packaged `launcher/runtime-target`: the Colorsoft pauses, and
-PW3 and PW5 stop, which frees the stock UI's memory on those devices. KUAL
-offers the default and both explicit modes in its Kobalt menu. The Colorsoft
-KPM package installs two Library entries: **Kobalt** starts with the default
-pause, and **Kobalt (stop stock UI)** runs `kpm launch kobalt --stop-ui` as a
-fallback. KPM passes that flag to the package's launch hook, which hands it to
-the shared launcher. The Colorsoft ZIP carries the same two Library scriptlets
-for firmware without KUAL.
+Kobalt pauses the stock interface while it runs, as KOReader does by default,
+on every target. Every target uses the same `launcher/launch.sh` and
+`launcher/supervisor.sh`. KUAL has one **Start Kobalt** entry, and the
+Colorsoft KPM package installs one **Kobalt** Library entry that runs
+`kpm launch kobalt`. The Library's own folder settings choose the books; the
+entry passes no `--library`, so the default `/mnt/us/documents` is added to the
+Library only when it is missing.
 
-The Colorsoft default changed after a stop-mode exit on firmware 5.20.1 left a
-white screen on wake: the restarted framework reported the Home request as
-accepted, but no Home appeared, and recovery still reported success. A stopped
-run now waits, on every target, until `lipc-get-prop com.lab126.appmgrd
-activeApp` names a stock booklet. On the Colorsoft it repeats the Home request
-every ten seconds while it waits. `KOBALT_KINDLE_HOME_WAIT` bounds the wait in
-seconds (600 by default). If no application becomes active, the supervisor logs
-that and keeps its recovery directory; a restart of the Kindle recovers. All
-three firmware fixtures provide `activeApp` in `libappmgr`. Supervisor lines in
-`kobalt/logs/launcher.log` start with a UTC timestamp, including the
-`memory` lines; the reader's own output and power events are not timestamped.
+The former stop mode, which ran `stop lab126_gui` and restarted the framework
+on exit, is retired. On Colorsoft firmware 5.20.1 a restarted framework once
+came back without Home and woke to a white screen, and on a PW3 the restart
+cold-booted the stock UI for minutes. The launcher refuses `--stop-ui` with a
+message and still accepts `--pause-ui` from older menus.
 
-Stopping runs `stop lab126_gui` and restarts it on exit; on a PW3 the stock UI
-then cold-boots for minutes. Pausing needs firmware 5.7.2 or newer,
-read from `/etc/prettyversion.txt`; older or unreadable firmware falls back to
-stopping and says so in the launcher log. It saves the framebuffer, disables
-pillow (`com.lab126.pillow disableEnablePillow`) and freezes the running
-`awesome` with STOP, in addition to the volume daemon. On exit it resumes
-`awesome`, writes the saved frame back, re-enables pillow and asks `appmgrd` to
-start Home, so Home returns almost at once. These stock calls are bounded like
-the stop path's. The supervisor refuses a window manager that another reader
-already froze. The reader's exclusive touch grab keeps the paused UI from seeing
-touches; the power button still reaches stock power services in both modes.
-With the framework running, the power helper listens through an anonymous LIPC
-client and leaves `frameworkStarted` to the framework. Both modes write system
-`MemFree` and `MemAvailable` to the launcher log before and after the UI change.
-KOReader's extra service stops (`stored`, `webreader` and the like) are not
-copied. Pass the flag before other options:
-`sh /mnt/us/kobalt/launcher/launch.sh --pause-ui --library DIRECTORY`.
+Pausing needs firmware 5.7.2 or newer, read from `/etc/prettyversion.txt`; the
+supervisor refuses older or unreadable firmware before it takes anything. It
+also refuses a stopped `lab126_gui`, and a volume daemon or window manager that
+another reader already froze. It saves the framebuffer, disables pillow
+(`com.lab126.pillow disableEnablePillow`) and freezes the running `awesome` and
+the volume daemon with STOP. On exit or after an application crash it resumes
+them, reloads the screensaver it released, writes the saved frame back,
+re-enables pillow and asks `appmgrd` to start Home, so Home returns almost at
+once. These stock calls are bounded. If a step fails, the supervisor logs it
+and keeps its recovery directory. The reader's exclusive touch grab keeps the
+paused UI from seeing touches; the power button still reaches stock power
+services. The power helper listens through an anonymous LIPC client and leaves
+`com.lab126.kaf` and `frameworkStarted` to the running framework. KOReader's
+extra service stops (`stored`, `webreader` and the like) are not copied.
+
+Supervisor lines in `kobalt/logs/launcher.log` start with a UTC timestamp,
+including the `memory` lines with system `MemFree` and `MemAvailable` before and
+after the pause; the reader's own output and power events are not timestamped.
+The frozen stock UI keeps its memory. On the Colorsoft, stopping it freed about
+300 MB (MemFree 97 MB before, 396 MB after); a PW3 with 512 MB had only 7 to
+32 MB of MemFree with the stock UI stopped, so check its pause-mode `memory`
+lines and watch for out-of-memory exits on large books.
 
 Colorsoft firmware 5.20.1 has the pieces pause mode uses: its
 `/etc/prettyversion.txt` reads `Kindle 5.20.1`, and it ships `/usr/bin/awesome`,
-the `pillow` Upstart job and `pidof`. Pause mode was validated on a physical PW3;
-on the Colorsoft only the shared supervisor checks and these firmware contents
-have been checked.
+the `pillow` Upstart job and `pidof`. Pause mode was validated on a physical PW3
+and, with an earlier package, on the Colorsoft.
 
-If a paused run's supervisor is killed, resume the PIDs in
-`/var/tmp/kobalt-kindle-prototype/awesome.pid` with CONT, run
+If the supervisor is killed, resume the PIDs in
+`/var/tmp/kobalt-kindle-prototype/awesome.pid` and `volume.pid` with CONT, run
 `lipc-set-prop com.lab126.pillow disableEnablePillow enable`, and then
-`lipc-set-prop com.lab126.appmgrd start app://com.lab126.booklet.home`. Resume
-the volume daemon in `volume.pid` with CONT as after a stopped run, and remove
-the recovery directory only after confirming those processes.
+`lipc-set-prop com.lab126.appmgrd start app://com.lab126.booklet.home`. Remove
+the recovery directory only after confirming those processes. A restart of the
+Kindle also recovers.
 
 ## Validation
 
