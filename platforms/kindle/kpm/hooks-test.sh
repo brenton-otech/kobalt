@@ -17,7 +17,7 @@ unpack() {
     rm -rf "$package"
     mkdir -p "$package/scriptlets" "$package/kobalt/bin" "$package/kobalt/launcher" "$package/kobalt/lib/$1"
     cp "$HOOKS/install.sh" "$HOOKS/uninstall.sh" "$HOOKS/launch.sh" "$package/"
-    cp "$HOOKS/Kobalt.sh" "$HOOKS/Kobalt-stop.sh" "$package/scriptlets/"
+    cp "$HOOKS/Kobalt.sh" "$package/scriptlets/"
     echo "kobalt $2" >"$package/kobalt/bin/kobalt"
     echo launcher >"$package/kobalt/launcher/launch.sh"
     echo "$1" >"$package/kobalt/lib/$1/lib$1.so"
@@ -36,7 +36,6 @@ hook install.sh >/dev/null
 [ "$(cat "$app/data/settings.sqlite")" = settings ] || fail 'install changed data'
 [ "$(cat "$app/logs/launcher.log")" = log ] || fail 'install changed logs'
 cmp -s "$HOOKS/Kobalt.sh" "$KOBALT_KPM_DOCUMENTS/Kobalt.sh" || fail 'scriptlet missing'
-cmp -s "$HOOKS/Kobalt-stop.sh" "$KOBALT_KPM_DOCUMENTS/Kobalt-stop.sh" || fail 'stop-UI scriptlet missing'
 grep -q '^data/\|^logs/' "$app/kpm-installed.txt" && fail 'install recorded app-owned files'
 [ -z "$(find "$scratch/packages/kobalt/kobalt" -type f)" ] || fail 'install copied instead of moving'
 
@@ -70,14 +69,12 @@ hook uninstall.sh >/dev/null
 [ "$(cat "$app/logs/launcher.log")" = log ] || fail 'uninstall removed logs'
 [ -f "$app/notes.txt" ] || fail 'uninstall removed a file it did not install'
 [ -f "$KOBALT_KPM_DOCUMENTS/Kobalt.sh" ] || fail 'uninstall removed a changed scriptlet'
-[ ! -e "$KOBALT_KPM_DOCUMENTS/Kobalt-stop.sh" ] || fail 'uninstall kept an unchanged scriptlet'
 
 # A clean reinstall and uninstall leave no app folder or scriptlet behind.
-rm -rf "$app" "$KOBALT_KPM_DOCUMENTS/Kobalt.sh" "$KOBALT_KPM_DOCUMENTS/Kobalt-stop.sh"
+rm -rf "$app" "$KOBALT_KPM_DOCUMENTS/Kobalt.sh"
 unpack first 1
 hook install.sh >/dev/null
 hook uninstall.sh >/dev/null
 [ ! -e "$app" ] || fail 'uninstall left an empty app folder'
 [ ! -e "$KOBALT_KPM_DOCUMENTS/Kobalt.sh" ] || fail 'uninstall left the scriptlet'
-[ ! -e "$KOBALT_KPM_DOCUMENTS/Kobalt-stop.sh" ] || fail 'uninstall left the stop-UI scriptlet'
 echo 'Kindle KPM hook checks passed.'

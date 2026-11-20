@@ -14,7 +14,6 @@
 typedef void Lipc;
 typedef void LipcEvent;
 typedef int (*EventCallback)(Lipc *, const char *, LipcEvent *, void *);
-typedef int (*PropertyCallback)(Lipc *, const char *, void *, void *);
 static int wake_pipe[2] = { -1, -1 };
 static volatile sig_atomic_t stopping;
 static volatile sig_atomic_t overflow;
@@ -30,15 +29,6 @@ static void terminate(int sig)
         (void)ignored;
     }
     errno = saved;
-}
-
-static int framework_started(Lipc *handle, const char *name, void *value, void *data)
-{
-    (void)handle;
-    (void)name;
-    (void)data;
-    *(int *)value = 1;
-    return 0;
 }
 
 static int event_received(Lipc *handle, const char *name, LipcEvent *event, void *data)
@@ -99,48 +89,28 @@ int main(void)
     }
     Lipc *(*LipcOpenEx)(const char *, int *);
     void (*LipcClose)(Lipc *);
-    int (*LipcRegisterIntProperty)(Lipc *, const char *, PropertyCallback, PropertyCallback,
-                                   void *);
     int (*LipcSubscribeExt)(Lipc *, const char *, const char *, EventCallback, void *);
     int (*LipcSetIntProperty)(Lipc *, const char *, const char *, int);
     LOAD(LipcOpenEx);
     LOAD(LipcClose);
-    LOAD(LipcRegisterIntProperty);
     LOAD(LipcSubscribeExt);
     LOAD(LipcSetIntProperty);
-    /* Paused stock UI: the running framework already owns com.lab126.kaf and
-       publishes frameworkStarted. Claiming that name fails with error 17, so
-       listen through an anonymous client and leave the framework's state alone. */
-    const char *framework_running = getenv("KOBALT_KINDLE_FRAMEWORK_RUNNING");
-    const int shared = framework_running && !strcmp(framework_running, "1");
+    /* The paused stock UI keeps running: its framework owns com.lab126.kaf
+       and publishes frameworkStarted. Claiming that name fails with error 17,
+       so listen through an anonymous client and leave the framework alone. */
     int error = 0;
     Lipc *handle = NULL;
-    if (shared) {
-        Lipc *(*LipcOpenNoName)(void);
-        *(void **)(&LipcOpenNoName) = dlsym(library, "LipcOpenNoName");
-        if (LipcOpenNoName)
-            handle = LipcOpenNoName();
-        if (!handle)
-            handle = LipcOpenEx("com.lab126.kobalt.power", &error);
-        if (!handle) {
-            fprintf(stderr, "Cannot open power client beside the framework: %d\n", error);
-            return 1;
-        }
-    } else {
-        handle = LipcOpenEx("com.lab126.kaf", &error);
-        if (!handle) {
-            fprintf(stderr, "Cannot own framework service: %d\n", error);
-            return 1;
-        }
+    Lipc *(*LipcOpenNoName)(void);
+    *(void **)(&LipcOpenNoName) = dlsym(library, "LipcOpenNoName");
+    if (LipcOpenNoName)
+        handle = LipcOpenNoName();
+    if (!handle)
+        handle = LipcOpenEx("com.lab126.kobalt.power", &error);
+    if (!handle) {
+        fprintf(stderr, "Cannot open power client beside the framework: %d\n", error);
+        return 1;
     }
     int result = 1;
-    if (!shared) {
-        error = LipcRegisterIntProperty(handle, "frameworkStarted", framework_started, NULL, NULL);
-        if (error != 0) {
-            fprintf(stderr, "Cannot publish framework state: %d\n", error);
-            goto done;
-        }
-    }
 
     static const struct
     {

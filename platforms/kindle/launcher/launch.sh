@@ -2,24 +2,17 @@
 
 # KUAL invokes this wrapper. The supervisor survives both its caller and an app crash.
 set -eu
-# --pause-ui freezes the stock interface while Kobalt runs, as KOReader does,
-# so Home returns almost at once. --stop-ui shuts it down and cold-boots it on
-# exit. Without a flag the packaged target's default applies.
-UI_MODE=
+# Kobalt pauses the stock interface while it runs, as KOReader does, so Home
+# returns almost at once. --pause-ui is accepted from older menus; the former
+# stop mode, which shut the framework down and cold-booted it, is retired.
 case "${1:-}" in
-    --pause-ui) UI_MODE=pause; shift ;;
-    --stop-ui) UI_MODE=stop; shift ;;
+    --pause-ui) shift ;;
+    --stop-ui)
+        echo 'Kobalt no longer stops the stock UI. Start it without --stop-ui.' >&2
+        exit 1
+        ;;
 esac
 APP_DIR=$(CDPATH='' cd "$(dirname "$0")/.." && pwd -P)
-if [ -z "$UI_MODE" ]; then
-    # The Colorsoft pauses by default: a cold-restarted framework on firmware
-    # 5.20 can come back without a usable Home. PW3 and PW5 keep stop, which
-    # frees the stock UI's memory on the smaller devices.
-    case "$(cat "$APP_DIR/launcher/runtime-target" 2>/dev/null)" in
-        colorsoft) UI_MODE=pause ;;
-        *) UI_MODE=stop ;;
-    esac
-fi
 if [ "$(uname -s)" != Linux ]; then
     echo 'Kobalt Kindle requires Kindle Linux.' >&2
     exit 1
@@ -33,8 +26,7 @@ fi
 [ -x "$APP_DIR/bin/kobalt-power-bridge" ] || { echo 'Kindle power bridge is missing.' >&2; exit 1; }
 [ -f "$APP_DIR/launcher/supervisor.sh" ] || exit 1
 sh "$APP_DIR/launcher/check-storage.sh" "$APP_DIR" || exit 1
-required_tools='status start stop nohup usleep readlink ps grep umount lipc-get-prop lipc-set-prop'
-[ "$UI_MODE" != pause ] || required_tools="$required_tools pidof cat sed head"
+required_tools='status nohup usleep readlink ps grep umount lipc-get-prop lipc-set-prop pidof cat sed head date'
 for tool in $required_tools; do
     command -v "$tool" >/dev/null || { echo "Required Kindle command missing: $tool" >&2; exit 1; }
 done
@@ -58,6 +50,6 @@ chmod 700 "$RUN_DIR/power-bridge"
 # Keep the supervisor and its open files on system storage. USB export must
 # not depend on a shell or log descriptor inside /mnt/us.
 cd /
-nohup sh "$RUN_DIR/supervisor.sh" "$APP_DIR" "$RUN_DIR" "$UI_MODE" "$@" >>"$RUN_DIR/launcher.log" 2>&1 </dev/null &
+nohup sh "$RUN_DIR/supervisor.sh" "$APP_DIR" "$RUN_DIR" "$@" >>"$RUN_DIR/launcher.log" 2>&1 </dev/null &
 trap - EXIT
 echo "Kobalt supervisor started: $!"

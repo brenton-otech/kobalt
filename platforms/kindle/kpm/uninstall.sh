@@ -10,7 +10,7 @@ APP=${KOBALT_KPM_APP:-/mnt/us/kobalt}
 DOCUMENTS=${KOBALT_KPM_DOCUMENTS:-/mnt/us/documents}
 RUN_DIR=${KOBALT_KPM_RUN_DIR:-/var/tmp/kobalt-kindle-prototype}
 LIST="$APP/kpm-installed.txt"
-SCRIPTLETS="Kobalt.sh Kobalt-stop.sh"
+SCRIPTLETS="Kobalt.sh"
 
 if [ -d "$RUN_DIR" ]; then
     echo "Kobalt is running, or its previous supervisor failed ($RUN_DIR). Exit Kobalt first." >&2

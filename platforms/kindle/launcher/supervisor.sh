@@ -3,12 +3,9 @@
 set -u
 APP_DIR=$1
 RUN_DIR=$2
-# pause keeps the stock UI running but frozen, as KOReader does by default.
-# stop shuts the framework down and cold-boots it on exit.
-UI_MODE=$3
-shift 3
-case "$UI_MODE" in pause|stop) ;; *) say "Unknown stock UI mode: $UI_MODE"; exit 1 ;; esac
-framework_stopped=no
+# The stock UI keeps running but frozen while Kobalt runs, as KOReader does by
+# default: pillow is disabled and the window manager is stopped with STOP.
+shift 2
 pillow_disabled=no
 awesome_held=no
 awesome_pids=
@@ -121,33 +118,6 @@ restore_screensaver()
     [ "$screensaver_loaded" = yes ] || return 0
     bounded_stock 50 lipc-set-prop -s -q com.lab126.blanket load screensaver || return 1
     wait_for_module screensaver yes
-}
-
-confirm_home()
-{
-    # A started service is not a usable stock UI: on Colorsoft firmware 5.20 a
-    # restarted framework can come back without an active application and
-    # wake to a white screen. Wait until appmgrd reports an active stock
-    # booklet. The Colorsoft does not open Home by itself, so request it there
-    # and repeat the request while the framework starts.
-    request_home=no
-    [ "$(cat "$APP_DIR/launcher/runtime-target" 2>/dev/null)" != colorsoft ] || request_home=yes
-    [ "$request_home" = no ] || say 'Opening stock Kindle Home.'
-    home_attempts=0
-    while [ "$home_attempts" -lt "${KOBALT_KINDLE_HOME_WAIT:-600}" ]; do
-        if [ "$request_home" = yes ] && [ $((home_attempts % 10)) = 0 ]; then
-            bounded_stock 10 lipc-set-prop com.lab126.appmgrd start app://com.lab126.booklet.home &&
-                say 'Stock Kindle Home activation requested.'
-        fi
-        active_app=$(bounded_stock 20 lipc-get-prop -s -q com.lab126.appmgrd activeApp) || active_app=
-        case "$active_app" in
-            *com.lab126.booklet.*) say "Stock Kindle application active: $active_app"; return 0 ;;
-        esac
-        usleep 1000000 || return 1
-        home_attempts=$((home_attempts + 1))
-    done
-    say 'No stock Kindle application became active.'
-    return 1
 }
 
 release_overlays()
@@ -271,28 +241,6 @@ recover()
         fi
         [ "$screen_restored" = yes ] || return
     fi
-    if [ "$framework_stopped" = yes ]; then
-        screen_restored=yes
-        say 'Restoring stock screensaver.'
-        if ! restore_screensaver; then
-            screen_restored=no
-            say 'Could not reload stock screensaver. Recovery files remain.'
-        fi
-        say 'Starting stock Kindle interface.'
-        if bounded_stock 150 start lab126_gui; then
-            framework_stopped=no
-            say 'Stock Kindle interface start request completed.'
-        else
-            say "Could not restart lab126_gui. Run 'start lab126_gui' from SSH."
-            # Retain the lock and this recovery script after a restoration failure.
-            return
-        fi
-        if ! confirm_home; then
-            say 'Could not confirm an active Kindle Home. Recovery files remain; restart the Kindle if the screen stays blank.'
-            return
-        fi
-        [ "$screen_restored" = yes ] || return
-    fi
     [ "$volume_held" = no ] || return
     [ "$waveform_restored" = yes ] || return
     recovery_complete=yes
@@ -319,7 +267,7 @@ trap cleanup EXIT
 trap terminate INT TERM
 trap '' HUP
 echo "$$" >"$RUN_DIR/pid"
-say "Kobalt supervisor started: target $(cat "$APP_DIR/launcher/runtime-target" 2>/dev/null), stock UI $UI_MODE."
+say "Kobalt supervisor started: target $(cat "$APP_DIR/launcher/runtime-target" 2>/dev/null)."
 
 state=$(status lab126_gui 2>&1) || { say "$state"; exit 1; }
 case "$state" in
@@ -334,6 +282,13 @@ else
     [ "$module_status" != 2 ] || { say 'Cannot inspect stock screensaver modules.'; exit 1; }
 fi
 echo "$screensaver_loaded" >"$RUN_DIR/screensaver.loaded"
+
+# Pausing needs pillow's disable switch (FW 5.6.5) and a window manager it
+# can freeze (FW 5.7.2). Older or unreadable firmware is refused.
+if ! pause_supported; then
+    say 'Refusing to launch: this firmware cannot pause the stock UI (5.7.2 or newer is needed).'
+    exit 1
+fi
 
 # Freeze only the current stock volume daemon. It must not unmount USB
 # storage while Kobalt still maps its executable, Qt libraries and profile.
@@ -357,63 +312,37 @@ export KOBALT_KINDLE_USB_NETWORK
 volume_held=yes
 kill -STOP "$volume_pid" || exit 1
 
-log_memory 'before stock UI change'
-if [ "$UI_MODE" = pause ] && ! pause_supported; then
-    say 'This firmware cannot pause the stock UI; stopping it instead.'
-    UI_MODE=stop
-fi
-
-if [ "$UI_MODE" = pause ]; then
-    # Freeze exactly the window manager that is running now. Refuse one that
-    # another reader already paused, as with volumd.
-    awesome_pids=$(pidof awesome) || awesome_pids=
-    [ -n "$awesome_pids" ] || { say 'Refusing to launch: awesome is not running.'; exit 1; }
-    for awesome_pid in $awesome_pids; do
-        case "$awesome_pid" in ''|*[!0-9]*) say 'Invalid awesome PID.'; exit 1 ;; esac
-        awesome_state=$(ps -o stat= -p "$awesome_pid") || exit 1
-        case "$awesome_state" in
-            ''|*T*|*t*|*Z*|*X*) say 'Refusing to launch: awesome is stopped or unavailable.'; exit 1 ;;
-        esac
-    done
-    echo "$awesome_pids" >"$RUN_DIR/awesome.pid"
-    if cat "${KOBALT_KINDLE_FB_DEVICE:-/dev/fb0}" >"$RUN_DIR/fb.dump" 2>/dev/null; then
-        fb_dump=yes
-    else
-        rm -f "$RUN_DIR/fb.dump"
-    fi
-    # Record each cleanup obligation before its action, as with volumd.
-    pillow_disabled=yes
-    bounded_stock 50 lipc-set-prop com.lab126.pillow disableEnablePillow disable || { say 'Could not disable pillow; Kobalt was not started.'; exit 1; }
-    awesome_held=yes
-    # shellcheck disable=SC2086
-    kill -STOP $awesome_pids || { say 'Could not pause awesome; Kobalt was not started.'; exit 1; }
+log_memory 'before stock UI pause'
+# Freeze exactly the window manager that is running now. Refuse one that
+# another reader already paused, as with volumd.
+awesome_pids=$(pidof awesome) || awesome_pids=
+[ -n "$awesome_pids" ] || { say 'Refusing to launch: awesome is not running.'; exit 1; }
+for awesome_pid in $awesome_pids; do
+    case "$awesome_pid" in ''|*[!0-9]*) say 'Invalid awesome PID.'; exit 1 ;; esac
+    awesome_state=$(ps -o stat= -p "$awesome_pid") || exit 1
+    case "$awesome_state" in
+        ''|*T*|*t*|*Z*|*X*) say 'Refusing to launch: awesome is stopped or unavailable.'; exit 1 ;;
+    esac
+done
+echo "$awesome_pids" >"$RUN_DIR/awesome.pid"
+if cat "${KOBALT_KINDLE_FB_DEVICE:-/dev/fb0}" >"$RUN_DIR/fb.dump" 2>/dev/null; then
+    fb_dump=yes
 else
-    # Stopping the framework may signal the KUAL process tree. Ignore TERM until
-    # ownership is recorded, as in the upstream Kindle framework-stop launch flow.
-    trap '' INT TERM
-    if stop lab126_gui; then
-        framework_stopped=yes
-        # Upstream KOReader waits for the final framework black frame and delayed
-        # TERM before restoring its handler and starting a framebuffer client.
-        usleep 1250000 || exit 1
-    else
-        trap terminate INT TERM
-        say 'Could not stop lab126_gui; Kobalt was not started.'
-        exit 1
-    fi
-    trap terminate INT TERM
+    rm -f "$RUN_DIR/fb.dump"
 fi
+# Record each cleanup obligation before its action, as with volumd.
+pillow_disabled=yes
+bounded_stock 50 lipc-set-prop com.lab126.pillow disableEnablePillow disable || { say 'Could not disable pillow; Kobalt was not started.'; exit 1; }
+awesome_held=yes
+# shellcheck disable=SC2086
+kill -STOP $awesome_pids || { say 'Could not pause awesome; Kobalt was not started.'; exit 1; }
 
 if ! release_overlays; then
     say 'Could not release stock screen overlays; Kobalt was not started.'
     exit 1
 fi
 
-# The power helper must not claim the framework's LIPC service while the
-# framework is still running.
-framework_running=0
-[ "$UI_MODE" != pause ] || framework_running=1
-log_memory "with stock UI $UI_MODE"
+log_memory 'with stock UI paused'
 # Stock recovery commands must keep their original library environment even
 # when the app cannot execute or its bundled libraries cannot be mapped.
 QT_QPA_PLATFORM=kindle \
@@ -421,7 +350,6 @@ QT_QPA_PLATFORM_PLUGIN_PATH="$APP_DIR/plugins/platforms" \
 QT_PLUGIN_PATH="$APP_DIR/plugins" \
 QT_QPA_FONTDIR="$APP_DIR/assets/fonts" \
 LD_LIBRARY_PATH="$APP_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-KOBALT_KINDLE_FRAMEWORK_RUNNING="$framework_running" \
 KOBALT_KINDLE_HOME="$APP_DIR" \
 KOBALT_KINDLE_RUN_DIR="$RUN_DIR" \
 KOBALT_KINDLE_POWER_BRIDGE="$RUN_DIR/power-bridge" \

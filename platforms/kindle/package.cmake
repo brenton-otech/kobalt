@@ -90,9 +90,7 @@ if(target STREQUAL "colorsoft")
     # Rebuild the Library scriptlets so a renamed one cannot linger in the stage.
     file(REMOVE_RECURSE "${stage}/documents")
     file(MAKE_DIRECTORY "${stage}/documents")
-    foreach(name Kobalt.sh Kobalt-stop.sh)
-        configure_file("${CMAKE_CURRENT_LIST_DIR}/launcher/${name}" "${stage}/documents/${name}" COPYONLY)
-    endforeach()
+    configure_file("${CMAKE_CURRENT_LIST_DIR}/launcher/Kobalt.sh" "${stage}/documents/Kobalt.sh" COPYONLY)
     list(APPEND zip_roots documents)
 endif()
 execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cf "${BUILD}/${package}" --format=zip ${zip_roots}
@@ -111,9 +109,7 @@ if(target STREQUAL colorsoft)
         configure_file("${CMAKE_CURRENT_LIST_DIR}/kpm/${name}" "${stage}/${name}" COPYONLY)
     endforeach()
     file(REMOVE_RECURSE "${stage}/scriptlets")
-    foreach(name Kobalt.sh Kobalt-stop.sh)
-        configure_file("${CMAKE_CURRENT_LIST_DIR}/kpm/${name}" "${stage}/scriptlets/${name}" COPYONLY)
-    endforeach()
+    configure_file("${CMAKE_CURRENT_LIST_DIR}/kpm/Kobalt.sh" "${stage}/scriptlets/Kobalt.sh" COPYONLY)
     set(kpm_package "${KOBALT_KINDLE_ARTIFACT}.kpkg")
     # manifest.json comes first so KPM finds it without reading the whole archive.
     execute_process(COMMAND "${CMAKE_COMMAND}" -E tar czf "${BUILD}/${kpm_package}"

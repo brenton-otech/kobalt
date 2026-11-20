@@ -6,7 +6,6 @@
 #include <string.h>
 #include <unistd.h>
 typedef int (*EventCallback)(void *, const char *, void *, void *);
-typedef int (*PropertyCallback)(void *, const char *, void *, void *);
 
 static struct Binding
 {
@@ -62,17 +61,6 @@ void LipcClose(void *handle)
     atomic_store(&closed, 1);
     pthread_join(worker, NULL);
     fprintf(stderr, "closed\n");
-}
-
-int LipcRegisterIntProperty(void *handle, const char *name, PropertyCallback get,
-                            PropertyCallback set, void *data)
-{
-    int value = 0;
-    fprintf(stderr, "registered:%s\n", name);
-    if (getenv("FAKE_REGISTER_FAIL"))
-        return 1;
-    return strcmp(name, "frameworkStarted") || set || !get || get(handle, name, &value, data)
-            || value != 1;
 }
 
 int LipcSubscribeExt(void *handle, const char *source, const char *name, EventCallback callback,
