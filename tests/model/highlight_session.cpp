@@ -8,6 +8,7 @@
 #include "reader_inputs.h"
 #include "reading/bookmark_session.h"
 #include "reading/highlight_session.h"
+#include "engine/engine_activity.h"
 #include "reading/reader_session.h"
 #include "support/qt_compat.h"
 
@@ -596,6 +597,7 @@ int main(int argc, char **argv)
         require(session.highlights().first().style == previous.style
                         && samePassage(previous, detail(session, previous.id)),
                 "Failed restyle kept its change in memory");
+        engineActivity().pause(true);
         completed = false;
         session.save(
                 first.start, first.end, previous.id,
@@ -605,6 +607,8 @@ int main(int argc, char **argv)
                 },
                 first.end, true, first.start, true);
         waitUntil([&] { return completed && saveFailures == 3; });
+        waitUntil([&] { return engineActivity().quiescent(); });
+        engineActivity().pause(false);
         require(saved && session.highlights().size() == 1
                         && session.highlights().first().id == previous.id
                         && samePassage(previous, detail(session, previous.id)),
@@ -695,6 +699,17 @@ int main(int argc, char **argv)
                             && excerpts[0].text == b.text && excerpts[1].text == a.text,
                     "Compact session did not fetch requested excerpts in order");
             require(detail(compact, a.id).note == a.note, "Compact session lost an unloaded note");
+            require(excerpts[1].note == a.note && excerpts[0].note.isEmpty(),
+                    "Compact excerpts did not carry their notes");
+            const auto row = [&](const QString &id) {
+                for (const auto &h : compact.highlights())
+                    if (h.id == id)
+                        return h;
+                require(false, "Compact session lost a highlight");
+                return Highlight{};
+            };
+            require(hasHighlightNote(row(a.id)) && !hasHighlightNote(row(b.id)),
+                    "Compact records did not report which highlights have notes");
             isCompact();
             require(!compact.sync(), "Compact session unexpectedly resolved without a batch");
             waitUntil([&] { return compact.resolved(); });
@@ -723,6 +738,26 @@ int main(int argc, char **argv)
             waitUntil([&] { return adjusted && !compact.saving(); });
             require(detail(compact, a.id).note == a.note, "Compact endpoint edit erased its note");
             isCompact();
+            // Writing a note on a compact record keeps the rest of its payload.
+            const QString note = QStringLiteral("Named on a whim.\nSee chapter 3.");
+            require(compact.setNote(b.id, note), "Cannot write a note on a compact highlight");
+            waitUntil([&] { return !compact.saving(); });
+            isCompact();
+            const auto noted = detail(compact, b.id);
+            require(noted.note == note && noted.text == b.text && noted.chapter == b.chapter
+                            && hasHighlightNote(row(b.id)),
+                    "A saved note was lost, or changed the passage");
+            require(compact.excerpts({ b.id }, &excerpts) && excerpts.size() == 1
+                            && excerpts[0].note == note,
+                    "An excerpt read after a note edit returned the old note");
+            require(compact.setNote(b.id, QStringLiteral(" \n ")),
+                    "Cannot clear a note with only whitespace");
+            waitUntil([&] { return !compact.saving(); });
+            require(detail(compact, b.id).note.isEmpty() && !hasHighlightNote(row(b.id)),
+                    "A note of only whitespace was kept");
+            require(!compact.setNote(b.id, QString(HighlightStore::maxNoteUnits + 1, QChar('x')))
+                            && detail(compact, b.id).note.isEmpty(),
+                    "An oversized note was accepted");
             require(compact.remove(b.id) && compact.highlights().size() == 1
                             && detail(compact, a.id).note == a.note,
                     "Compact deletion changed the remaining note");

@@ -22,19 +22,36 @@ endif()
 # into evaluation packages, and the Library belongs to the standalone apps.
 file(GLOB_RECURSE kobo_shared_sources ${kobo_glob_options} "${kobo_source}/*.cpp" "${kobo_source}/*.h")
 list(FILTER kobo_shared_sources EXCLUDE REGEX "/src/scenario/")
+list(FILTER kobo_shared_sources EXCLUDE REGEX "/src/engine/blaze/")
+file(GLOB_RECURSE engine_adapter ${kobo_glob_options} "${kobo_source}/engine/blaze/adapter/*.cpp" "${kobo_source}/engine/blaze/adapter/*.h")
+list(APPEND kobo_shared_sources ${engine_adapter})
 list(FILTER kobo_shared_sources EXCLUDE REGEX "/(library|app/library)/")
+# Activity's book covers use the Library's EPUB cover reader and its
+# thumbnail loader on every platform.
+list(APPEND kobo_shared_sources
+    "${kobo_source}/library/book_metadata.cpp" "${kobo_source}/library/book_metadata.h"
+    "${kobo_source}/library/cover_thumbnails.cpp" "${kobo_source}/library/cover_thumbnails.h")
 # The adapters of this SDK's firmware.
 file(GLOB kobo_adapter_sources ${kobo_glob_options}
     "${kobo_directory}/common/*.cpp" "${kobo_directory}/common/*.h"
     "${kobo_directory}/nickel-qt${KOBALT_QT_MAJOR}/*.cpp" "${kobo_directory}/nickel-qt${KOBALT_QT_MAJOR}/*.h"
     "${kobo_directory}/display/*.cpp")
+if(KOBALT_QT_MAJOR EQUAL 5)
+    file(GLOB kobo_wifi_idle_sources ${kobo_glob_options}
+        "${kobo_directory}/nickel-fixes/wifi-idle/*.cpp"
+        "${kobo_directory}/nickel-fixes/wifi-idle/*.h")
+    list(APPEND kobo_adapter_sources ${kobo_wifi_idle_sources}
+        "${kobo_directory}/nickel-fixes/wifi-idle/nickelfix/memory.cc"
+        "${kobo_directory}/nickel-fixes/wifi-idle/nickelfix/kepub-reader/detour.cc")
+endif()
 set(kobo_c_sources "${kobo_directory}/common/install.c" "${kobo_directory}/common/startup_recovery.c")
 # NickelHook's loader, linked into the mod library only.
 set(kobo_hooks "${kobo_directory}/toolchains/nickelhook-qt6")
 set(kobo_hook_sources "${kobo_hooks}/nh.c" "${kobo_hooks}/resources.c")
 # An evaluation package (KOBALT_EVAL_PACKAGE) adds the scenario player and
 # this definition.
-set(kobo_eval_sources "${kobo_source}/scenario/player.cpp")
+set(kobo_eval_sources "${kobo_source}/scenario/player.cpp"
+    "${kobo_source}/scenario/resources.cpp")
 set(kobo_eval_definitions KOBALT_SCENARIO_PLAYER)
 
 # Options of the application objects and the mod library, on top of the
@@ -75,7 +92,11 @@ set(kobo_event_history_test_sources "${kobo_pewter}/event_history.cpp")
 set(kobo_custom_pins_test_sources "${KOBALT_ROOT}/tests/model/custom_pins.cpp")
 set(kobo_custom_pins_test_definitions
     KOBALT_TEST_CUSTOM_PIN_SVG=\"${KOBALT_ROOT}/tests/fixtures/custom-pins/cat.svg\")
-set(kobo_test_sources ${kobo_progress_test_sources} ${kobo_keyboard_test_sources}
+set(kobo_wifi_idle_test_sources "")
+if(KOBALT_QT_MAJOR EQUAL 5)
+    set(kobo_wifi_idle_test_sources "${kobo_pewter}/wifi_idle.cpp")
+endif()
+set(kobo_test_sources ${kobo_wifi_idle_test_sources} ${kobo_progress_test_sources} ${kobo_keyboard_test_sources}
     ${kobo_native_ui_test_sources} ${kobo_tile_cover_test_sources} ${kobo_event_history_test_sources}
     ${kobo_custom_pins_test_sources})
 # The Qt5 refresh test fakes the display driver call itself. It compiles its

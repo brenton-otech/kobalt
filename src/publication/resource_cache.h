@@ -37,6 +37,9 @@ public:
     // Worker-only, after the previous opening has drained. Existing streams
     // retain this cache object; all access callbacks must change together.
     bool rebind(const ResourceCache &fresh);
+    // New resource bytes and image state, through the same authorized access.
+    // Retains member fingerprints so a reload still rejects changed content.
+    std::shared_ptr<ResourceCache> fresh() const;
     ResourceCache(QStringList names, Loader loader, std::shared_ptr<std::atomic_bool> cancelled,
                   Statistics transferStatistics = {}, ImageProbe imageProbe = {});
     QSize deferredImageSize(const QString &name);
@@ -67,6 +70,7 @@ public:
 private:
     struct Entry
     {
+        std::list<QString>::iterator recent;
         qint64 size = 0;
         qint64 capacity = 0;
         std::vector<std::unique_ptr<char[]>> blocks;

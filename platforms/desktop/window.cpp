@@ -461,11 +461,11 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
             start->applyTextSize();
     });
     start->setDark(controller.preferences().value("dark_mode").toBool(false));
-    connect(start, &standalone::StartScreen::bookRequested, this, &Window::openBook);
+    connect(start, &standalone::StartScreen::bookRequested, this,
+            [this](const QString &path) { openBook(path); });
     connect(start, &standalone::StartScreen::passageRequested, this,
             [this](const QString &key, const QString &position) {
-                controller.setStartPosition(position);
-                openBook(key);
+                openBook(key, position);
             });
     connect(start, &standalone::StartScreen::libraryOpenRequested, this, &Window::chooseBook);
     connect(start, &standalone::StartScreen::markUnreadRequested, this, [this](const QString &key) {
@@ -537,6 +537,9 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     showToolbar->setText(tr("Show Toolbar"));
     showToolbar->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+T")));
     view->addAction(showToolbar);
+    auto *monitor = view->addAction(tr("Engine Monitor"), this, &Window::engineMonitorRequested);
+    monitor->setObjectName("desktopEngineMonitor");
+    monitor->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+E")));
     for (const auto key : { Qt::Key_Right, Qt::Key_PageDown, Qt::Key_Left, Qt::Key_PageUp }) {
         auto *shortcut = new QShortcut(QKeySequence(key), this);
         shortcut->setAutoRepeat(false);
@@ -573,6 +576,7 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
         auto *reader = controller.window();
         canvas->setContent(reader, renderingDpi != 0, renderingDpi ? renderingDpi / 300.0 : 1.0);
         stack->setCurrentWidget(canvas);
+        start->releaseOpening();
         sizeCanvas();
         reader->show();
         setUpdatesEnabled(true);
@@ -839,7 +843,7 @@ void Window::recordProgress()
     store.setProgress(std::exchange(openedKey, {}), progress.percent, progress.finished);
 }
 
-void Window::openBook(const QString &path)
+void Window::openBook(const QString &path, const QString &position)
 {
     const auto absolute = QFileInfo(path).absoluteFilePath();
     if (closing || (controller.window() && controller.path() == absolute))
@@ -857,7 +861,7 @@ void Window::openBook(const QString &path)
     deviceFrame->next->setEnabled(false);
     start->showOpening(absolute, controller.preferences().value("show_opening_cover").toBool(true));
     stack->setCurrentWidget(start);
-    controller.open(absolute, pixels(), {}, restart);
+    controller.open(absolute, pixels(), {}, restart, position);
 }
 
 void Window::turnPage(int direction, bool hardware)
@@ -926,6 +930,8 @@ Window::~Window()
 {
     qApp->removeEventFilter(this);
     setTouchCursor(false);
+    // The Library disconnects its store callback while the store is still alive.
+    delete start;
 }
 
 void Window::setTouchCursor(bool visible, bool pressed)

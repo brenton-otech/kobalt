@@ -24,7 +24,7 @@ KOSync is not part of this exchange; see [KOSync: a separate sync mechanism](#ko
 Kobalt saves the position in its own profile while the user reads. It writes to Nickel only at lifecycle boundaries, never on a page turn:
 
 - When a book opens: the reading status only (`NativeProgress::markReading`).
-- Before sleep, before USB export, at power-off and when the book closes: the full progress write (`NativeProgress::write`) and the reading time of the session that ends.
+- Before sleep, before USB export, at power-off and when the book closes: the full progress write (`NativeProgress::write`). The same transaction ends Nickel's reading session and adds its reading time, as Nickel's reader does; see [Reading time](#reading-time).
 - A reading session starts when a book is shown or the device wakes, and ends at sleep or close.
 
 The page turn must never wait for storage. All writes to Nickel's database use Nickel's own functions, on Nickel's interface thread at these boundaries, or on Nickel's event thread for events. See [the main-thread guard](validation.md#main-thread-guard) for the declared waits.
@@ -60,7 +60,7 @@ It checks for a changed committed position after Nickel's signals: the sync mana
 7. Commit, then read the row again on the separate connection and compare every written field. If anything differs, refresh Nickel's cache and report that persistence could not be verified. The local position stays.
 8. Ask Nickel to upload: if `BookmarkSyncManagerBase::syncReadingState` allows it, `BookmarkSyncManager::sendBookmark`. Nickel decides eligibility, network and power. This is not proof that the server received it.
 
-When Kobalt has no position Nickel can store, as for some plain EPUB files, it writes only the time, the status and the percentage, and skips step 8.
+When a supported book has no mapped position, Kobalt writes the last-read date, status, percentage and available estimates without replacing the native bookmark. This includes store KEPUBs on Kobo. Tolino refuses an unmapped position before entering a native transaction, preserving its bookmark metadata and sync flag. On Kobo, the activity-only save preserves the sync flag and skips step 8. The verified activity-only result acknowledges the unchanged bookmark with the new date; Kobalt retains its exact position locally. Store-server reconciliation of this fallback remains unverified.
 
 On Qt 5, step 5 also writes the current chapter's own row for a KEPUB book, as Nickel's firmware 4 reader does at sleep and close. Kobalt finds the chapter row (`ContentType` 9) whose ID, `<book>!<OPF folder>!<path from the OPF>`, matches the position's file, and calls `ShortcoverManager::updatePercentRead` with floor(page in chapter ÷ chapter pages × 100), inside the same transaction. Unlike `CurrentChapterProgress`, this counts the current page as read: page 5 of 9 stores 55 on the chapter row and 0.444 as `CurrentChapterProgress`, as Nickel's firmware 4 reader does. It skips this when the book is finished. Nickel's firmware 6 reader does not write that row: at close it works out the current chapter and its progress, then saves only the book row (`ReadingView::saveProgress` passes them to `updateContentLocation`, which does not use them, and nothing calls `updatePercentRead`). Kobalt's Qt 6 build does the same.
 
@@ -70,7 +70,11 @@ On Qt 5, step 5 also writes the current chapter's own row for a KEPUB book, as N
 
 ### Reading time
 
-`addTime` in `native_reading_session.cpp`, both packages, when a session ends. Under Nickel's transaction it adds the session's seconds to `Volume::timeSpentReading` with `Volume::setTimeSpentReading`, updates only that field, and commits. A delta of 24 hours or more is rejected. A successful commit consumes the delta even when the readback is unavailable; later attempts only verify it.
+`NativeReadingSession::endIn` and `endNow` in `native_reading_session.cpp`, both packages. Nickel's reader ends its reading session and saves the reading time in the transaction that saves the progress, on the interface thread: `ReadingView::leavingReadingExperience` runs `BEGIN IMMEDIATE`, `EventEngine::endReadingSession`, `Volume::save` with `TimeSpentReading`, and `COMMIT`. Kobalt does the same. The progress write (`NativeProgress::write`) calls `endIn` on the Volume it saves: it ends Nickel's session, which returns the session's seconds, and adds them with `Volume::setTimeSpentReading`. A delta of 24 hours or more is not added. When a boundary writes no progress, for example a sleep with an unchanged position or a book whose position Kobalt does not map, `endNow` does the same in a short transaction of its own. When the transaction does not commit, the seconds stay with the session and the next progress write or `endNow` adds them.
+
+A stop pauses the session and writes nothing. Nickel's session stays open while the reader is hidden, for example under a Nickel dialog, as it does under a dialog in Nickel's own reader. Only a close, sleep, USB export or power-off ends it, including a sleep while Nickel's browser covers the hidden reader. A reader disposed without a final save, after authorization is lost or with Quit without saving, ends Nickel's session too, but writes no reading time.
+
+Nickel's event thread runs with idle priority: Nickel starts it with `QThread::IdlePriority`, which Qt maps to `SCHED_IDLE` on Linux. It gets the processor only when no other thread needs it, so while the device is busy a write there can take seconds while using milliseconds of processor time, and no busy timeout catches that. Kobalt runs no write there and never waits for that thread. `endReadingSession` only queues the session's events to it. Because Kobalt calls `endReadingSession` inside its transaction, the event thread's insert into `Event` waits for Kobalt's commit; it cannot hold the database while the progress write begins.
 
 ### Reading sessions and events
 
@@ -82,7 +86,7 @@ On Qt 5, step 5 also writes the current chapter's own row for a KEPUB book, as N
 
 Nickel turns the start and end into the analytics events `OpenContent` and `LeaveContent`. `LeaveContent` carries the progress at the end of the session, `SecondsRead`, `PagesTurned` and `IdleTime`. Nickel adds title, author, content type and format, `Origin`, `Monetization` and `ViewType`.
 
-Nickel keeps these events in memory until `EventEngine::savePendingEvents` writes them to the `AnalyticsEvents` table. That function clears its buffer even when the save fails, and on firmware 4.46 it saves nothing unless it runs on the event engine's own thread. Kobalt calls it on that thread after a session starts and after it ends. It first takes Nickel's default-database transaction, waiting at most 2 seconds, and skips the save if it cannot, so the buffer survives until the next save (`saveNativeEvents` in `platforms/kobo/common/native_event_save.h`). If the outer commit fails, Kobalt rolls back its own transaction so later native saves can begin. This cleanup cannot restore events that Nickel already removed from its buffer. Nickel also saves the buffer on a timer and at shutdown.
+Nickel keeps these events in memory until `EventEngine::savePendingEvents` writes them to the `AnalyticsEvents` table. Nickel saves the buffer on a three-second timer, when a sync submits analytics, and at shutdown, which covers power-off, reboot and USB connection. Sleep does not save it; the events stay in memory. Nickel's own reader never saves the buffer when a book closes, and Nickel never calls `EventManager::flush`. Kobalt does the same. Earlier versions saved the buffer themselves on Nickel's event thread after a session started and after it ended, and the close waited for that save, which could take more than seven seconds during a sync.
 
 ### Native page history
 
@@ -179,8 +183,7 @@ A book whose Nickel content ID is not a `file:///` path came through Nickel's sy
 
 - `model.chapter-progress`: the chapter-progress formula.
 - `platform.native-progress` and `model.reading-progress`: progress signals and position rules.
-- `platform.nickel-event-save`: the event save under a competing writer.
-- `platform.nickel-reading-save`, `lifecycle.closeWaitsForNativeTimeBeforePosition` and `lifecycle.sleepWaitsForNativeTimeBeforePosition`: the order and failure handling of time and position writes.
+- `lifecycle.closeWritesPositionBeforeNativeTime` and `lifecycle.sleepWritesPositionBeforeNativeTime`: the progress write comes before the reading-time finish at close and sleep, and the failure handling of both. The Kobo session itself runs only on Nickel; check it in VirtualNickel on firmware 4 and 6.
 - `pewter.event-history`, in both Kobo SDKs: the 10,000 trigger, whole-session retention, malformed histories, preserved fields and event-thread guard.
 - `pewter.progress`, in both Kobo SDKs: the status at opening, the position and progress write, the recent book at close, and their failure paths, as described above. It runs the firmware adapters against [pewter](validation/kobo.md#pewter-the-fake-nickel), a fake Nickel, with `bash platforms/kobo/build.sh qt5 --check` and `qt6 --check`.
 - Firmware behavior, such as the upload format and the analytics conditions, cannot be checked by the native tests or pewter. Check it on a device or an emulated Nickel after a firmware or code change, against a local sync server: the stored row after sleep and close, the `PUT .../state` body, and the `AnalyticsEvents` rows and their upload.

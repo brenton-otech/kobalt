@@ -1,6 +1,7 @@
 #include "style_sample.h"
-#include "engine/crengine/engine_worker.h"
-#include "engine/crengine/engine_activity.h"
+#include "engine/engine.h"
+#include "engine/engine_worker.h"
+#include "engine/engine_activity.h"
 #include "appearance_settings.h"
 #include "reading_density.h"
 #include "support/qt_compat.h"
@@ -117,7 +118,7 @@ bool cancelled(const StyleSampleRequest &request)
 }
 
 // Applying an option is the costly step, so it also checks for cancellation.
-bool apply(EngineDocument &engine, const StyleSampleRequest &request, const QJsonValue &value)
+bool apply(Engine &engine, const StyleSampleRequest &request, const QJsonValue &value)
 {
     if (cancelled(request))
         return false;
@@ -127,7 +128,7 @@ bool apply(EngineDocument &engine, const StyleSampleRequest &request, const QJso
     return engine.applyAppearance(kobalt::appearance::Patch(settings));
 }
 
-QStringList pageStarts(EngineDocument &engine)
+QStringList pageStarts(Engine &engine)
 {
     QStringList starts;
     for (int page = 0; page < qMin(engine.pages(), searchedPages + 1); ++page)
@@ -152,7 +153,7 @@ int firstChangedBreak(const QVector<QStringList> &starts)
 
 // The first page that the options draw differently, or -1. Page spacing moves
 // lines within a page without changing where pages start.
-int firstChangedPage(EngineDocument &engine, const StyleSampleRequest &request, int completeSpreads)
+int firstChangedPage(Engine &engine, const StyleSampleRequest &request, int completeSpreads)
 {
     for (int page = 0; page < qMin(completeSpreads, searchedPages); ++page) {
         QImage first;
@@ -241,8 +242,7 @@ QVector<QRect> spareSpace(const QVector<QPair<int, int>> &bands,
     return spare;
 }
 
-QVector<QRect> paragraphGaps(EngineDocument &engine, const QRect &area,
-                             const QStringList &paragraphs)
+QVector<QRect> paragraphGaps(Engine &engine, const QRect &area, const QStringList &paragraphs)
 {
     const auto line = [&engine](const QString &query, bool last) {
         const auto hits = engine.searchPage(query, 0).hits;
@@ -291,13 +291,13 @@ StyleSample render(const EngineFontInputs &fonts, const StyleSampleRequest &requ
     auto settings = request.settings;
     settings[request.key] = request.values.first();
     const bool pages = request.crop.isEmpty();
-    std::unique_ptr<EngineDocument> engine;
+    std::unique_ptr<Engine> engine;
     int page = 0;
     result.differs = false;
     for (int variant = 0; variant < (pages ? sampleVariants : 1) && !result.differs; ++variant) {
         if (cancelled(request))
             return {};
-        engine = std::make_unique<EngineDocument>(fonts);
+        engine = createEngine(fonts);
         QMap<QString, qint64> sizes;
         QString error;
         const bool opening =
@@ -309,7 +309,7 @@ StyleSample render(const EngineFontInputs &fonts, const StyleSampleRequest &requ
         // The opening paragraphs give the first page its own lines only when
         // they continue onto a second page. Otherwise lay out all of it.
         if (opening && request.key != "paragraph_spacing" && engine->pages() < 2) {
-            engine = std::make_unique<EngineDocument>(fonts);
+            engine = createEngine(fonts);
             sizes.clear();
             if (!engine->openResources(sampleBook(document, variant, &sizes, false), sizes,
                                        request.page, settings, &error)
@@ -448,6 +448,56 @@ StyleSample render(const EngineFontInputs &fonts, const StyleSampleRequest &requ
 }
 } // namespace
 
+void setTextSampleText(TextSampleRequest &request)
+{
+    static const auto text = [] {
+        QPair<QString, QStringList> result;
+        bool inExcerpt = false;
+        for (const auto &block : sampleDocument(false, false).blocks) {
+            if (!block.paragraph && result.first.isEmpty())
+                result.first = block.text;
+            if (!block.paragraph)
+                continue;
+            // This paragraph shows hyphenation within the first few lines at the default size.
+            if (block.text.startsWith(QLatin1String("Either the well was very deep")))
+                inExcerpt = true;
+            if (inExcerpt)
+                result.second.append(block.text);
+            if (result.second.size() == paragraphSampleCount)
+                break;
+        }
+        return result;
+    }();
+    request.heading = text.first;
+    request.paragraphs = text.second;
+}
+
+void renderTextSample(EngineFontInputs fonts, TextSampleRequest request, QObject *context,
+                      std::function<void(QImage)> finished)
+{
+    QPointer<QObject> guard(context);
+    // The sample uses CREngine's global fonts, so it is drawn on the
+    // reader's engine worker. A document that is never opened costs nothing.
+    kobalt::qt::invoke(
+            engineWorker(),
+            [guard, fonts = std::move(fonts), request = std::move(request),
+             finished = std::move(finished)] {
+                QImage image;
+                {
+                    EngineJob activity;
+                    image = createEngine(fonts)->drawTextSample(request);
+                }
+                kobalt::qt::invoke(
+                        qApp,
+                        [guard, finished, image = std::move(image)] {
+                            if (guard)
+                                finished(image);
+                        },
+                        Qt::QueuedConnection);
+            },
+            Qt::QueuedConnection);
+}
+
 QJsonObject styleSampleSettings(QJsonObject state)
 {
     for (const auto *key :
@@ -457,6 +507,15 @@ QJsonObject styleSampleSettings(QJsonObject state)
     // sample does not depend on them, and a kept sample must not either.
     for (const auto *key :
          { "page", "next_page", "cached_pages", "chapter_title", "chapter_page", "chapter_pages" })
+        state.remove(key);
+    // A book that shows one chapter at a time has more of these: where the
+    // part is in the book, its estimated pages and how long it took to
+    // load. With them a kept sample would never be found again.
+    for (const auto *key :
+         { "book_fraction", "slice_start", "continues_before", "continues_after",
+           "chapter_load_ms", "page_estimate", "rough_page", "rough_pages", "rough_item_page",
+           "rough_item_pages", "rough_pages_estimated", "rough_item_pages_estimated",
+           "koblaze_first_spine_item", "koblaze_last_spine_item" })
         state.remove(key);
     // The sample shows one column, even when the book uses two in landscape.
     state["columns"] = 1;
@@ -507,24 +566,33 @@ QJsonObject styleSamplePageSettings(const QJsonObject &reading)
 }
 
 void renderStyleSample(EngineFontInputs fonts, StyleSampleRequest request, QObject *context,
-                       std::function<void(StyleSample)> finished)
+                       std::function<void(StyleSample)> finished, std::function<void()> yielded)
 {
     QPointer<QObject> guard(context);
+    const auto queued = engineWorkRequests();
+    auto *worker = yielded ? engineWorkerForIdle() : engineWorker();
     // The sample document shares CREngine's global fonts and caches, so it is
     // created, used and destroyed on the reader's engine worker.
     kobalt::qt::invoke(
-            engineWorker(),
-            [guard, fonts = std::move(fonts), request = std::move(request),
-             finished = std::move(finished)] {
+            worker,
+            [guard, yielded = std::move(yielded), queued, fonts = std::move(fonts),
+             request = std::move(request), finished = std::move(finished)] {
+                bool deferred = false;
                 StyleSample result;
                 {
                     EngineJob activity;
-                    result = render(fonts, request);
+                    deferred = yielded && engineWorkRequests() != queued;
+                    if (!deferred)
+                        result = render(fonts, request);
                 }
                 kobalt::qt::invoke(
                         qApp,
-                        [guard, finished, result = std::move(result)]() mutable {
-                            if (guard)
+                        [guard, finished, yielded, deferred, result = std::move(result)]() mutable {
+                            if (!guard)
+                                return;
+                            if (deferred)
+                                yielded();
+                            else
                                 finished(std::move(result));
                         },
                         Qt::QueuedConnection);

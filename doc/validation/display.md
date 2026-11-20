@@ -16,7 +16,7 @@ The widget keyboard batches key release with the editor change. On MediaTek in t
 
 ## Qt5 refresh adapter
 
-The Kobo test `pewter.qt5-refresh`, in `tests/pewter/refresh_qt5.cpp`, drives the production Qt5 refresh adapter through both policy-list ABIs, against the firmware Qt 5.2.1 libraries of the prepared Qt5 image. `bash platforms/kobo/build.sh qt5 --check` builds and runs it with the [Kobo adapter tests](kobo.md#pewter-the-fake-nickel).
+The Kobo test `pewter.qt5-refresh`, in `tests/pewter/refresh_qt5.cpp`, drives the production Qt5 refresh adapter through both policy-list ABIs, against the firmware Qt 5.2.1 libraries of the prepared Qt5 image. It also checks that a selection drag uses the direct waveform in partial mode, and that the next update redraws the dragged area once with REAGL in full mode. The Qt6 adapter applies the same rule without a pewter check, and the physical refresh speed is not measured. `bash platforms/kobo/build.sh qt5 --check` builds and runs it with the [Kobo adapter tests](kobo.md#pewter-the-fake-nickel).
 
 ## Device results and limits
 
@@ -25,3 +25,5 @@ These are synthetic policy, submission and transport checks. They do not resolve
 A Pixel 9a confirmed the light Library background and system-bar icon contrast after deployment. Dark-theme system-bar icons still need a physical-device check. A BOOX device run confirmed that the loading caption and progress bar fit the display and that the Library settles at its correct inset size. Its book-to-Library recording still shows brief blank or repositioning frames. The native handoff checks do not cover Android compositor timing, so the return transition remains an open device issue.
 
 Page-content metadata has one codec shared by the renderer and display helpers. It distinguishes unknown regions from inspected empty regions, clips coordinates to the page and retains the existing text-only fallback for missing or malformed records. Model checks cover these distinctions, partial malformed records, illustration identity and isolation between completed image copies. The engine checks retain the encoded metadata comparison between page pixel formats. Shared reader code uses semantic predicates instead of metadata keys.
+
+Dark-mode eligibility checks cover the detected i.MX and MediaTek backends, unavailable hooks, persisted dark mode and theme changes through Settings and Light. They verify that the animation checkbox retains its saved value and still permits changes in dark mode. The transition and low-level submission checks reject i.MX dark sweeps, including a stale turn direction, while MediaTek keeps both themes. The Qt5 adapter check covers the light-only i.MX behavior through both policy-list ABIs. These checks do not establish a board-revision mapping or physical animation timings.

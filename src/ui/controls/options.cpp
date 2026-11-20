@@ -295,10 +295,14 @@ void DescribedOption::paintEvent(QPaintEvent *)
     if (leadingIcon >= 0) {
         // The same place as a list action row's icon, balancing its bearings.
         const int size = metrics::chrome::cellIcon;
-        controlIcon(ControlIcon(leadingIcon), ink)
-                .paint(&painter,
-                       QRect(textLeft - iconSpace() - px(7), (height() - size) / 2 + px(1), size,
-                             size));
+        const QRect bounds(textLeft - iconSpace() - px(7), (height() - size) / 2 + px(1), size,
+                           size);
+        const auto icon = controlIcon(ControlIcon(leadingIcon), ink);
+        // Annotate uses the same custom painter as the navigation tabs.
+        if (icon.isNull())
+            paintOpeningIcon(painter, ControlIcon(leadingIcon), bounds, ink);
+        else
+            icon.paint(&painter, bounds);
     }
     painter.setPen(ink);
     QFont labelFont = font();
@@ -465,6 +469,8 @@ void RadioList::setUniformRows(bool uniform)
 
 int RadioList::rowHeight(int index, int width) const
 {
+    if (index >= 0 && index < leftOut.size() && leftOut[index])
+        return 0;
     if (uniformRows || index < 0 || index >= rows.size())
         return rowHeight(width);
     return qMax(minimum, rows[index]->heightForWidth(width));
@@ -500,6 +506,18 @@ void RadioList::showRows(int from, int number)
     updateGeometry();
 }
 
+void RadioList::setLeftOut(int index, bool value)
+{
+    if (index < 0 || index >= rows.size())
+        return;
+    leftOut.resize(rows.size());
+    if (leftOut[index] == value)
+        return;
+    leftOut[index] = value;
+    arrange();
+    updateGeometry();
+}
+
 void RadioList::resizeEvent(QResizeEvent *)
 {
     arrange();
@@ -511,7 +529,8 @@ void RadioList::arrange()
     int top = 0;
     for (int index = 0; index < rows.size(); ++index) {
         auto *row = rows[index];
-        const bool shown = index >= first && index < last;
+        const bool shown =
+                index >= first && index < last && !(index < leftOut.size() && leftOut[index]);
         auto look = row->presentation();
         look.dividers = Edges(Qt::BottomEdge)
                 | (topDivider && index == first ? Edges(Qt::TopEdge) : Edges{});

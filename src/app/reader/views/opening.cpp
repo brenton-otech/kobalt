@@ -151,7 +151,7 @@ class OpeningDialog final : public QDialog
 {
 public:
     OpeningDialog(QWidget *background, bool dark, PresentationFactory makePresentation,
-                  bool embedded = false, bool showCover = true)
+                  bool embedded = false, bool showCover = true, bool deferred = false)
         : QDialog(background, embedded ? Qt::SubWindow : Qt::Dialog | Qt::FramelessWindowHint),
           presentation(makePresentation(this)),
           embedded(embedded),
@@ -164,6 +164,22 @@ public:
         setWindowModality(embedded ? Qt::NonModal : Qt::ApplicationModal);
         setProperty("reader_dark", dark);
         setAutoFillBackground(true);
+        QPalette colors = palette();
+        colors.setColor(QPalette::Window, dark ? Qt::black : Qt::white);
+        setPalette(colors);
+        platform::textRefresh(this);
+        if (!deferred)
+            prepareControls(
+                    qt::object({ { "dark_mode", dark }, { "show_opening_cover", showCover } }));
+    }
+
+    void prepareControls(const QJsonObject &preferences)
+    {
+        if (progress)
+            return;
+        const bool dark = preferences.value("dark_mode").toBool(false);
+        showCover = preferences.value("show_opening_cover").toBool(true);
+        setProperty("reader_dark", dark);
         QPalette colors = ui::readerPalette(palette(), dark);
         colors.setColor(QPalette::Midlight, ui::themeColors(dark).openingTrack);
         setPalette(colors);
@@ -210,12 +226,24 @@ public:
             platform::textRefresh(widget);
         platform::textRefresh(this);
         platform::coverRefresh(cover);
+        painted = false;
+        layoutWidgets();
+        if (isVisible()) {
+            brand->show();
+            label->show();
+            progress->show();
+            hint->show();
+            cancel->setVisible(!embedded);
+            hintTimer.start(ui::metrics::opening::hintDelayMilliseconds);
+            update();
+        }
     }
 
     void setCover(QImage image)
     {
         // An early cache miss is not proof that the publication has no cover.
-        if (!showCover || image.isNull())
+        // Before prepareControls() only the logo shows.
+        if (!showCover || image.isNull() || !cover)
             return;
         // Compare the source pixels per painted pixel after fitting the cover.
         // A late thumbnail must not replace a sharper image delivered earlier.
@@ -272,6 +300,8 @@ public:
     void setProgress(int percent)
     {
         auto *bar = progress;
+        if (!bar)
+            return;
         const int value = qMax(bar->value(), percent);
         if (bar->value() == value)
             return;
@@ -287,6 +317,9 @@ public:
 
     void showFallback(OpeningFallback state)
     {
+        if (!progress)
+            prepareControls(qt::object({ { "dark_mode", property("reader_dark").toBool() },
+                                         { "show_opening_cover", showCover } }));
         fallback = true;
         automatic = state == OpeningFallback::Protected || state == OpeningFallback::Remembered;
         storageFailure = state == OpeningFallback::Storage;
@@ -329,7 +362,7 @@ public:
 
     void setReopening()
     {
-        if (!fallback && !delayed)
+        if (hint && !fallback && !delayed)
             hint->setText(QLocale().toUpper(strings::get("opening.reopening")));
     }
 
@@ -362,7 +395,7 @@ protected:
     void showEvent(QShowEvent *event) override
     {
         QDialog::showEvent(event);
-        if (!fallback) {
+        if (progress && !fallback) {
             hint->show();
             hintTimer.start(ui::metrics::opening::hintDelayMilliseconds);
         }
@@ -384,7 +417,7 @@ protected:
         painter.fillRect(rect(), palette().color(QPalette::Window));
         if (!painted) {
             painted = true;
-            if (property("kobalt_tile_cover_probe").toBool()) {
+            if (cover && property("kobalt_tile_cover_probe").toBool()) {
                 setProperty("kobalt_first_cover_key", QString::number(cover->image.cacheKey()));
                 diagnostic(
                         "tile-cover-probe-first-paint",
@@ -395,6 +428,11 @@ protected:
             if (firstPaint) {
                 scheduleAfterPaint(std::move(firstPaint));
             }
+        }
+        if (!progress) {
+            ui::paintBrandSplash(painter, QRectF(rect()).center(), scale(),
+                                 property("reader_dark").toBool() ? Qt::white : Qt::black);
+            return;
         }
         painter.translate(origin() + QPointF(0, lift));
         painter.scale(scale(), scale());
@@ -412,6 +450,8 @@ protected:
 
     void layoutWidgets()
     {
+        if (!progress)
+            return;
         namespace opening = ui::metrics::opening;
         const auto place = [this](QWidget *widget, const QRectF &rect) {
             widget->setGeometry(placed(rect, lift));
@@ -566,20 +606,23 @@ private:
                  (height() - ui::metrics::opening::referenceHeight * scale()) / 2 };
     }
 
-    OpeningCover *cover;
+    OpeningCover *cover = nullptr;
     qreal lift = 0;
     bool delayed = false;
     std::shared_ptr<CoverRead> coverRead;
-    QProgressBar *progress;
-    QLabel *brand, *label, *hint;
-    OpeningRedirect *redirect;
+    QProgressBar *progress = nullptr;
+    QLabel *brand = nullptr;
+    QLabel *label = nullptr;
+    QLabel *hint = nullptr;
+    OpeningRedirect *redirect = nullptr;
     ui::ChoiceModal *failureDialog = nullptr;
     bool storageFailure = false;
     bool fallback = false, automatic = false;
     std::unique_ptr<WindowPresentation> presentation;
-    const bool embedded, showCover;
+    const bool embedded;
+    bool showCover;
     QTimer hintTimer;
-    ui::Button *cancel;
+    ui::Button *cancel = nullptr;
     bool painted = false;
     std::function<void()> firstPaint;
 };
@@ -588,10 +631,10 @@ class OpeningView final : public ReaderOpeningView
 {
 public:
     OpeningView(QWidget *background, const QJsonObject &preferences,
-                PresentationFactory presentation, bool embedded = false)
+                PresentationFactory presentation, bool embedded = false, bool deferred = false)
         : dialog(new OpeningDialog(background, preferences.value("dark_mode").toBool(false),
                                    std::move(presentation), embedded,
-                                   preferences.value("show_opening_cover").toBool(true)))
+                                   preferences.value("show_opening_cover").toBool(true), deferred))
     {
         if (embedded)
             return;
@@ -651,6 +694,12 @@ public:
             dialog->setReopening();
     }
 
+    void prepareControls(const QJsonObject &preferences) override
+    {
+        if (dialog)
+            dialog->prepareControls(preferences);
+    }
+
     void refreshFonts() override
     {
         if (dialog) {
@@ -678,21 +727,47 @@ createEmbeddedOpening(QWidget *parent, PresentationFactory presentation, bool sh
     return std::make_unique<OpeningView>(parent, preferences, std::move(presentation), true);
 }
 
-SaveErrorView::SaveErrorView(QWidget *parent, const QString &error, bool retried)
+std::unique_ptr<ReaderOpeningView> createOpeningSurface(QWidget *parent, bool dark,
+                                                        PresentationFactory presentation)
+{
+    QJsonObject preferences;
+    preferences["dark_mode"] = dark;
+    return std::make_unique<OpeningView>(parent, preferences, std::move(presentation), false, true);
+}
+
+SaveErrorView::SaveErrorView(QWidget *parent)
+    : ui::ChoiceModal(parent,
+                      { strings::get("sleep.reading_time_failed_detail"),
+                        strings::get("sleep.reading_time_failed"),
+                        {} },
+                      { strings::get("closing.return"), "rrSleepSaveReturn" },
+                      { strings::get("sleep.retry_save"), "rrSleepSaveRetry" })
+{
+    setObjectName("rrSleepSaveError");
+}
+
+SaveErrorView::SaveErrorView(QWidget *parent, const QString &error, bool retried, Cause cause,
+                             bool savedLocally)
     : ui::ChoiceModal(
               parent,
-              { strings::get("closing.failed_detail")
+              { strings::get(cause == Cause::TimedOut ? "closing.timeout_detail"
+                                                      : "closing.failed_detail")
                         + (error.isEmpty() ? QString() : "\n\n" + error)
-                        + (retried ? "\n\n" + strings::get("closing.quit_warning") : QString()),
-                strings::get("closing.failed"),
+                        + (retried ? "\n\n" + strings::get("closing.quit_warning")
+                                   : savedLocally
+                                   ? "\n\n" + strings::get("closing.close_now_detail")
+                                   : QString()),
+                strings::get(cause == Cause::TimedOut ? "closing.timeout" : "closing.failed"),
                 {} },
               { strings::get("closing.return"), "rrCloseSaveReturn" },
               { strings::get("closing.retry"), "rrCloseSaveRetry" })
 {
     setObjectName("rrCloseSaveError");
-    if (retried) {
-        quit = ui::makeModalButton(card(), { strings::get("closing.quit"), "rrCloseSaveQuit" },
-                                   false);
+    if (retried || savedLocally) {
+        quit = ui::makeModalButton(
+                card(),
+                { strings::get(retried ? "closing.quit" : "closing.close_now"), "rrCloseSaveQuit" },
+                false);
         quit->ensurePolished();
         quit->setFixedHeight(ui::metrics::chrome::actionHeight);
         card()->rows()->addWidget(quit);

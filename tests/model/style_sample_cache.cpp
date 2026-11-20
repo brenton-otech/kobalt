@@ -1,5 +1,8 @@
 #include "reading/style_sample_cache.h"
+#include "assets/assets.h"
+#include <QFile>
 #include <QGuiApplication>
+#include <QTemporaryDir>
 #include <QJsonObject>
 #include <cstdio>
 #include <functional>
@@ -42,7 +45,25 @@ int main(int argc, char **argv)
     request.values = { 80, 100, 120 };
     request.page = { 600, 800 };
     request.thumbnail = { 150, 200 };
-    const auto key = styleSampleKey(fonts, request);
+    QTemporaryDir directory;
+    require(directory.isValid(), "Could not create the sideloaded font directory");
+    fonts.sources.sideloadDirectory = directory.path();
+    const auto beforeInstall = discoverReadingFonts(fonts.sources);
+    const auto key = styleSampleKey(fonts, request, beforeInstall);
+    const auto face = directory.filePath("Reader.ttf");
+    require(QFile::copy(QStringLiteral(KOBALT_FONT_DIRECTORY) + "/IBMPlexSans-Regular.ttf", face),
+            "Could not install a reading font");
+    const auto installed = discoverReadingFonts(fonts.sources);
+    const auto installedKey = styleSampleKey(fonts, request, installed);
+    require(installedKey != key, "Installing a reading font reused the old preset thumbnail");
+    require(installedKey == styleSampleKey(fonts, request, discoverReadingFonts(fonts.sources)),
+            "An unchanged font directory discarded the preset thumbnail");
+    require(QFile::remove(face)
+                    && QFile::copy(QStringLiteral(KOBALT_FONT_DIRECTORY) + "/IBMPlexSans-Bold.ttf",
+                                   face),
+            "Could not replace the installed reading font");
+    require(installedKey != styleSampleKey(fonts, request, discoverReadingFonts(fonts.sources)),
+            "Replacing a reading font reused the old preset thumbnail");
     require(key == styleSampleKey(fonts, request), "The same request gave two keys");
     // Every input of a sample changes the key.
     const auto differs = [&](const char *what, std::function<void(StyleSampleRequest &)> change) {
@@ -82,9 +103,46 @@ int main(int argc, char **argv)
     turned["chapter_pages"] = 4;
     require(styleSampleSettings(turned) == styleSampleSettings(frame),
             "The displayed frame changed the sample settings");
+    // A book that shows one chapter at a time reports where that part is,
+    // its estimated pages and how long it took to load. None of it is an
+    // input: the next opening of the book must find the kept sample.
+    auto chapter = frame;
+    chapter["book_fraction"] = 0.25;
+    chapter["slice_start"] = "/body/DocFragment[3].0";
+    chapter["continues_before"] = true;
+    chapter["continues_after"] = true;
+    chapter["chapter_load_ms"] = 31.5;
+    chapter["page_estimate"] = QJsonObject{ { "version", 1 } };
+    chapter["rough_page"] = 12;
+    chapter["rough_pages"] = 300;
+    chapter["rough_item_page"] = 2;
+    chapter["rough_item_pages"] = 9;
+    chapter["rough_pages_estimated"] = true;
+    chapter["rough_item_pages_estimated"] = true;
+    chapter["koblaze_first_spine_item"] = 3;
+    chapter["koblaze_last_spine_item"] = 3;
+    require(styleSampleSettings(chapter) == styleSampleSettings(frame),
+            "The chapter that is shown changed the sample settings");
     auto otherFonts = fonts;
     otherFonts.fallbackFiles = QStringList{ "b.ttf" };
     require(styleSampleKey(otherFonts, request) != key, "The font inputs are not in the key");
+    // Kobo extracts the same compressed system font under a different root
+    // after each restart. The digest within that path identifies its bytes.
+    FontCopies firstRun, secondRun;
+    auto firstFonts = fonts, secondFonts = fonts;
+    const auto first = firstRun.file("system/Serif.ttf", "first");
+    const auto same = secondRun.file("system/Serif.ttf", "first");
+    const auto changed = secondRun.file("system/Serif.ttf", "other");
+    require(!first.isEmpty() && !same.isEmpty() && !changed.isEmpty() && first != same,
+            "Cannot prepare independent system font copies");
+    firstFonts.sources.systemFiles = QStringList{ first };
+    secondFonts.sources.systemFiles = QStringList{ same };
+    require(styleSampleKey(firstFonts, request) == styleSampleKey(secondFonts, request),
+            "The folder of a system font changed the key");
+    secondFonts.sources.systemFiles = QStringList{ changed };
+    require(styleSampleKey(firstFonts, request) != styleSampleKey(secondFonts, request),
+            "Changed font bytes reused the previous preview");
+
     // A cancellation flag is not an input.
     auto cancellable = request;
     cancellable.cancelled = std::make_shared<std::atomic_bool>(false);

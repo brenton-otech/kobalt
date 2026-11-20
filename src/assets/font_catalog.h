@@ -1,4 +1,5 @@
 #pragma once
+#include <QMap>
 #include <QStringList>
 #include <QVector>
 #include <cmath>
@@ -30,6 +31,7 @@ struct ReadingFont
     FontOrigin origin;
     FontWeightAxis weightAxis;
     FontOpticalSizeAxis opticalSizeAxis;
+    QByteArray directoryFileVersions = {};
 };
 
 struct FontSources
@@ -45,6 +47,10 @@ struct EngineFontInputs
     FontSources sources;
     QStringList fallbackFiles;
     QString hyphenationDirectory;
+    // Pattern files in that directory that failed their check; the engine
+    // does not load them.
+    QStringList excludedHyphenation = {};
+    QMap<QString, QByteArray> verifiedFontDigests = {};
     bool operator==(const EngineFontInputs &other) const;
 };
 

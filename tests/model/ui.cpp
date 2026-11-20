@@ -23,10 +23,12 @@
 #include "support/strings.h"
 #include "ui/style/fonts.h"
 #include "app/reader/window/font_registration.h"
+#include <QFileInfo>
 #include <QFontInfo>
 #include <QFontDatabase>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLocale>
 #include <QLineEdit>
 #include <QDir>
 #include <QTemporaryDir>
@@ -339,6 +341,92 @@ int main(int argc, char **argv)
         kobalt::setDiagnosticObserver({});
     }
     checkPrivateInterfaceText(kobalt::test::readerAssets());
+    {
+        // A line break is not a missing glyph. Labels measure their whole
+        // text, line breaks included, so a notice with a paragraph break
+        // must not open the bundled fallbacks on the GUI thread.
+        using namespace kobalt::ui;
+        const auto &assets = kobalt::test::readerAssets();
+        int loads = 0;
+        kobalt::setDiagnosticObserver([&](const QJsonObject &event) {
+            if (event.value("event").toString() == "font-load-start")
+                ++loads;
+        });
+        require(initializePrivateInterfaceText(assets), "Cannot reset private interface text");
+        measurePrivateText(QStringLiteral("Latin"), interfaceFont(24));
+        loads = 0;
+        measurePrivateText(QStringLiteral("first\nsecond\r\n\nthird\tfourth"), interfaceFont(24));
+        require(loads == 0, "Line breaks loaded fallback fonts");
+        // A fallback loads only when its character map has the character. The
+        // Japanese full stop has the Common script, so no script picks the CJK
+        // collection for it; the search must skip every file without it.
+        QVector<double> sizes;
+        kobalt::setDiagnosticObserver([&](const QJsonObject &event) {
+            if (event.value("event").toString() == "font-load-start") {
+                ++loads;
+                sizes.append(event.value("file_bytes").toDouble());
+            }
+        });
+        const auto loadsFor = [&](const QString &text) {
+            require(initializePrivateInterfaceText(assets), "Cannot reset private interface text");
+            measurePrivateText(QStringLiteral("Latin"), interfaceFont(24));
+            loads = 0;
+            sizes.clear();
+            measurePrivateText(text, interfaceFont(24));
+            return loads;
+        };
+        const double collection = QFileInfo(assets.file("fonts/NotoSerifCJK-Regular.ttc")).size();
+        require(loadsFor(QString(QChar(0x3002))) == 1 && sizes.value(0) == collection,
+                "A Japanese full stop loaded fonts that lack it");
+        require(loadsFor(QString::fromUcs4(U"\U00010400")) == 0,
+                "A character no bundled font maps loaded fallback fonts");
+        // Noto Serif Italic lacks U+20C0, which Noto Serif Regular maps. Italic
+        // text must not load the italic file for it.
+        const auto loadsInFont = [&](const QString &text, const QFont &font) {
+            require(initializePrivateInterfaceText(assets), "Cannot reset private interface text");
+            measurePrivateText(QStringLiteral("Latin"), font);
+            loads = 0;
+            sizes.clear();
+            measurePrivateText(text, font);
+            return loads;
+        };
+        auto italic = interfaceFont(24);
+        italic.setItalic(true);
+        const double regularSerif = QFileInfo(assets.file("fonts/NotoSerif-Regular.ttf")).size();
+        require(loadsInFont(QString(QChar(0x20C0)), italic) == 1 && sizes.value(0) == regularSerif,
+                "Italic text loaded a style file that lacks the character");
+        kobalt::setDiagnosticObserver([&](const QJsonObject &event) {
+            if (event.value("event").toString() == "font-load-start")
+                ++loads;
+        });
+        // A control character takes no space and draws nothing, also in a font
+        // that lacks it: Instrument Serif has no carriage return.
+        {
+            const auto brand = brandFont(32);
+            require(measurePrivateText(QStringLiteral("a\r"), brand)
+                                    == measurePrivateText(QStringLiteral("a"), brand)
+                            && measurePrivateText(QStringLiteral("a\n"), interfaceFont(24))
+                                    == measurePrivateText(QStringLiteral("a"), interfaceFont(24)),
+                    "A control character took space");
+            require(!renderPrivateText(QStringLiteral("a\rb"), brand).missingGlyphs,
+                    "A carriage return drew a missing glyph");
+        }
+        const auto notice = [&](bool savedLocally) {
+            require(initializePrivateInterfaceText(assets), "Cannot reset private interface text");
+            loads = 0;
+            QWidget parent;
+            parent.resize(1072, 1448);
+            kobalt::SaveErrorView view(&parent, {}, false, kobalt::SaveErrorView::Cause::TimedOut,
+                                       savedLocally);
+            view.setGeometry(parent.rect());
+            parent.grab();
+            return loads;
+        };
+        // The close-now text adds a paragraph break to the same notice.
+        require(notice(true) == notice(false),
+                "The save timeout notice with a paragraph break loaded fallback fonts");
+        kobalt::setDiagnosticObserver({});
+    }
     {
         using namespace kobalt::ui;
         const auto &assets = kobalt::test::readerAssets();
@@ -777,7 +865,9 @@ int main(int argc, char **argv)
                 labelInk(row.titleLabel(), QColor("#999999"));
                 row.setEnabled(true);
                 row.setChecked(false);
-                labelInk(row.detailLabel(), noteColor(&row));
+                // In light, secondary lines use plain ink, as the title does.
+                labelInk(row.detailLabel(),
+                         dark ? noteColor(&row) : first.palette().color(QPalette::WindowText));
                 row.setTitlePixels(px(34));
                 require(row.titleLabel()->font().pixelSize() == px(34),
                         "Owned title pixels do not reach the row label");
@@ -823,7 +913,9 @@ int main(int argc, char **argv)
                 labelInk(row.titleLabel(), QColor("#123456"));
                 row.setParent(&second);
                 labelInk(row.titleLabel(), second.palette().color(QPalette::WindowText));
-                labelInk(row.detailLabel(), noteColor(&row));
+                labelInk(row.detailLabel(),
+                         darkTheme(&row) ? noteColor(&row)
+                                         : second.palette().color(QPalette::WindowText));
                 changed.setColor(QPalette::WindowText, QColor("#654321"));
                 first.setPalette(changed);
                 labelInk(row.titleLabel(), second.palette().color(QPalette::WindowText));
@@ -1214,8 +1306,8 @@ int main(int argc, char **argv)
         QVector<int> icons;
         for (int id = int(ControlIcon::Search); id <= int(ControlIcon::More); ++id)
             icons.append(id);
-        for (const auto icon :
-             { ControlIcon::SearchChapter, ControlIcon::SearchBefore, ControlIcon::SearchAfter })
+        for (const auto icon : { ControlIcon::SearchChapter, ControlIcon::SearchBefore,
+                                 ControlIcon::SearchAfter, ControlIcon::DeviceRotate })
             icons.append(int(icon));
         for (const int id : icons) {
             const auto black = controlIcon(ControlIcon(id))
@@ -1242,6 +1334,33 @@ int main(int argc, char **argv)
                 }
             require(ink > 20, "Bundled icon is empty");
         }
+    }
+    {
+        using namespace kobalt::ui;
+        const int savedDensity = density();
+        for (int ppi : { 167, 212, 300 }) {
+            setDensity(ppi);
+            CheckCellButton button(ControlIcon::DeviceRotate, nullptr);
+            button.resize(button.sizeHint());
+            button.show();
+            QApplication::processEvents();
+            const auto unchecked = button.grab().toImage();
+            int toggles = 0;
+            QObject::connect(&button, &QPushButton::toggled, &button, [&] { ++toggles; });
+            button.click();
+            require(button.isCheckable() && button.isChecked() && toggles == 1,
+                    "Checkbox header button must toggle once per click");
+            const auto checked = button.grab().toImage();
+            require(checked != unchecked, "Checkbox header button did not show its checked state");
+            const QRect top(0, 0, unchecked.width(), unchecked.height() / 2);
+            require(checked.copy(top) == unchecked.copy(top),
+                    "Checking a header button moved or inverted its icon");
+            button.setEnabled(false);
+            button.click();
+            require(button.isChecked() && toggles == 1,
+                    "Disabled checkbox header button changed its saved choice");
+        }
+        setDensity(savedDensity);
     }
     {
         using namespace kobalt::ui;
@@ -2118,8 +2237,38 @@ int main(int argc, char **argv)
                 "A new session did not clear its displayed page turns");
         require(text("rrGraphChapterNumber") == get("stats.contents_position").arg(13).arg(24)
                         && text("rrGraphSessionFigure") == "23"
-                        && text("rrGraphBookDetail") == get("stats.words").arg("35,706"),
-                "Chapter number, session or word count is missing");
+                        && text("rrGraphBookDetail").isEmpty(),
+                "Chapter number or session is missing, or the book cell kept the word count");
+        // The word totals label the chart, between the bars and the cells.
+        const auto chapterWords = get("stats.words")
+                                          .arg(QLocale(QLocale::English, QLocale::UnitedStates)
+                                                       .toString(chapters[20].words));
+        require(text("rrGraphChapterWords") == get("stats.chapter_words").arg(13).arg(chapterWords)
+                        && text("rrGraphBookWords")
+                                == get("stats.book_words").arg(get("stats.words").arg("35,706")),
+                "The word totals below the chart are missing");
+        graph.setChapterNumber(0, 24);
+        require(text("rrGraphChapterWords") == get("stats.this_chapter_words").arg(chapterWords),
+                "A position before the contents named a chapter number");
+        graph.setChapterNumber(13, 24);
+        graph.setData(chapters, { 20, -1, 1, 1 }, false, {});
+        require(text("rrGraphChapterWords").isEmpty(),
+                "The chapter's word total did not wait for the counts");
+        graph.setData(chapters, { 20, -1, 1, 1 }, true, {});
+        for (int width : { 758, 1072, 1448 }) {
+            graph.resize(width, chapterMetrics::graphHeight);
+            QApplication::processEvents();
+            const auto *bars = graph.findChild<QWidget *>("rrChapterBars");
+            const auto *left = graph.findChild<QLabel *>("rrGraphChapterWords");
+            const auto *right = graph.findChild<QLabel *>("rrGraphBookWords");
+            const auto *cell = graph.findChild<QWidget *>("rrGraphChapterCell");
+            require(left->y() >= bars->geometry().bottom() && left->y() == right->y()
+                            && left->geometry().bottom() < cell->y()
+                            && left->geometry().right() < right->x()
+                            && kobalt::qt::textWidth(right->fontMetrics(), right->text())
+                                    <= right->width(),
+                    "The word totals overlap the chart, the cells or each other");
+        }
         for (int width : { 758, 1072, 1448 }) {
             graph.resize(width, chapterMetrics::graphHeight);
             graph.setProgress("Large book", 1, 3500, 3500, 1, 10000);
@@ -2256,13 +2405,26 @@ int main(int argc, char **argv)
                     const int controls = ui::px(phone ? 224 : 300);
                     QWidget host;
                     host.resize(ui::px(design.width()), ui::px(design.height()));
-                    ChapterGraph graph(&host);
+                    ChapterGraph graph(&host, phone);
                     graph.resize(host.width(), cm::graphHeight);
                     graph.setAvailableHeight(host.height() - controls);
                     graph.setData(balanced, {}, true, {});
+                    graph.setChapterNumber(4, 385);
+                    graph.setProgress("Chapter I", 1, 24, 24, 1, 240);
                     auto *bars = graph.findChild<QWidget *>("rrChapterBars");
                     host.show();
                     graph.open();
+                    const auto *contents = graph.findChild<QLabel *>("rrGraphChapterNumber");
+                    const auto *page = graph.findChild<QLabel *>("rrGraphChapterPosition");
+                    const auto *separator = graph.findChild<QLabel *>("rrGraphPositionSeparator");
+                    require(contents->isVisible() != phone && separator->isVisible() != phone
+                                    && page->isVisible(),
+                            "Phone Stats keeps a contents count or loses its chapter page");
+                    require(!phone
+                                    || (page->x() == int(ui::metrics::chrome::inset)
+                                        && qt::textWidth(page->fontMetrics(), page->text())
+                                                <= page->width()),
+                            "The phone chapter page is clipped or keeps the hidden count's gap");
                     const int bottom = graph.geometry().bottom();
                     const int balancedHeight = bars->height();
                     graph.setData(uneven, {}, true, {});
@@ -4603,7 +4765,7 @@ int main(int argc, char **argv)
         };
 
         Keyboard *keyboard = nullptr;
-        kobalt::DictionaryPanel panel(&reader, [&](QWidget *host, QLineEdit *) {
+        kobalt::DictionaryPanel panel(&reader, [&](QWidget *host, QWidget *) {
             require(host == &reader,
                     "The keyboard must belong to the reader, separately from the dictionary sheet");
             auto value = std::make_unique<Keyboard>(host);
@@ -5507,6 +5669,22 @@ int main(int argc, char **argv)
             require(row->grab().toImage() == plain,
                     "Clearing a typeface preview left sample pixels behind");
         }
+    }
+    {
+        kobalt::ui::PageScrubber scrubber(nullptr);
+        scrubber.setChapterBar(true);
+        scrubber.setBook(2, 8, {}, {});
+        scrubber.show();
+        scrubber.showCurrentPage();
+        scrubber.beginNavigation();
+        scrubber.setChapterBar(false, true);
+        scrubber.setBook(1100, 2400, {}, {});
+        scrubber.showCurrentPage();
+        const auto *slider = scrubber.slider();
+        require(scrubber.selectedPage() == 1100 && slider->value() == 1100
+                        && slider->minimum() > 0 && slider->maximum() < 2399
+                        && slider->maximum() - slider->minimum() + 1 <= 1000,
+                "Whole-book Navigate handoff lost the initial zoom range");
     }
     {
         using namespace kobalt::ui;

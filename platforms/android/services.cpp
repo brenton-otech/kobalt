@@ -14,13 +14,14 @@
 #include <QPointer>
 #include <QTime>
 #include <QJniObject>
+#include <QJsonDocument>
 
 namespace kobalt::android {
 namespace {
 class Keyboard final : public KeyboardController
 {
 public:
-    explicit Keyboard(QLineEdit *editor) : editor(editor) { }
+    explicit Keyboard(QWidget *editor) : editor(editor) { }
 
     bool show() override
     {
@@ -36,7 +37,7 @@ public:
     void place() override { }
 
 private:
-    QPointer<QLineEdit> editor;
+    QPointer<QWidget> editor;
 };
 
 class Presentation final : public WindowPresentation
@@ -72,6 +73,7 @@ ReaderHostServices readerHostServices()
         result.deviceName = QStringLiteral("Android");
     result.colorDisplay = [] { return true; };
     result.systemRotation = true;
+    result.showNativeReaderOptions = false;
     result.browserAvailable = [] { return true; };
     result.openBrowser = [](const QUrl &url, QWidget *) {
         return url.isValid() && !url.host().isEmpty()
@@ -101,6 +103,14 @@ ReaderHostServices readerHostServices()
     };
     result.fontFamilies = [] { return QStringList{}; };
     result.uiFont = [] { return ui::interfaceFont(); };
+    result.deferKosync = [](const QJsonObject &job) {
+        const auto text = QString::fromUtf8(QJsonDocument(job).toJson(QJsonDocument::Compact));
+        QJniObject::callStaticMethod<void>(
+                "org/kobalt/android/KosyncWork", "enqueue",
+                "(Landroid/content/Context;Ljava/lang/String;)V",
+                QNativeInterface::QAndroidApplication::context().object(),
+                QJniObject::fromString(text).object<jstring>());
+    };
     result.suspended = [] { return QGuiApplication::applicationState() != Qt::ApplicationActive; };
     result.lightAvailable = [] { return lightAvailable(); };
     result.textScale = [] {
@@ -131,9 +141,7 @@ ReaderHostServices readerHostServices()
                 QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
                 + "/user-folders/dictionaries");
     };
-    result.keyboard = [](QWidget *, QLineEdit *editor) {
-        return std::make_unique<Keyboard>(editor);
-    };
+    result.keyboard = [](QWidget *, QWidget *editor) { return std::make_unique<Keyboard>(editor); };
     result.presentation = [](QWidget *) { return std::make_unique<Presentation>(); };
     return result;
 }

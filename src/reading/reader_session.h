@@ -1,11 +1,13 @@
 #pragma once
-#include "engine/crengine/engine_document.h"
+#include "engine/engine.h"
 #include "open_request.h"
+#include "reading_progress.h"
 #include "highlight_geometry.h"
 #include "storage/custom_pins.h"
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QObject>
+#include <QPointer>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -14,6 +16,9 @@ namespace kobalt {
 struct BookmarkLocations
 {
     QVector<int> pages, order;
+    // Whole-book display indexes, separate from the loaded layout pages.
+    QVector<int> bookPages = {};
+    QStringList chapters = {};
 };
 
 struct ReaderMarkupRange
@@ -55,6 +60,7 @@ struct ReaderFrame
 {
     quint64 renderId = 0;
     int turnDirection = 0;
+    bool formattingWarning = false;
     QImage image;
     ReaderMarkupFrame markup;
     // Changed rectangle against the image with cache key `damageFrom`, if the
@@ -63,6 +69,8 @@ struct ReaderFrame
     qint64 damageFrom = 0;
     QJsonObject state, resources;
     QString title, author, error;
+    // Source identity of the painted page, independent of later slice preparation.
+    QString pageStart;
     qint64 totalWords = -1;
     QString nativePosition, nativePositionError;
     QImage cover;
@@ -87,8 +95,12 @@ struct RenderProgress
     // Reflow styles and pagination share one bar; a phase change never empties it.
     int overallPercent() const
     {
-        const int phase = qBound(0, int(stage) - int(OpeningStage::Styles), 2);
-        return qMin(100, (phase * 100 + qBound(0, percent, 100)) / 2);
+        const int done = qBound(0, percent, 100);
+        if (stage == OpeningStage::Styles)
+            return done * 10 / 100;
+        if (stage == OpeningStage::Pages)
+            return 10 + done * 89 / 100;
+        return stage == OpeningStage::Ready ? 99 : 0;
     }
 };
 
@@ -110,7 +122,7 @@ struct SyncedPositionDescription
 {
     PositionComparison comparison;
     QString chapter;
-    // Compared only: the page of the synced position in this layout, or -1.
+    // Compared only: the whole-book page of the synced position, or -1.
     int page = -1;
 };
 
@@ -134,6 +146,12 @@ public:
               std::function<void()> reusing = {});
     // A fresh facade prevents callbacks from the closed reader reaching a reopen.
     std::unique_ptr<ReaderSession> retained();
+    // Debug mode, in place of retained() when the reader closes: drops the
+    // book and removes its parsed-book cache. With `allBooks` it removes the
+    // whole cache, also `documentCache` when the book opened without it, and
+    // the preview tiles in `previews`. Runs on the engine worker, which the
+    // close barrier drains.
+    void evictDocumentCache(bool allBooks, const QString &documentCache, const QString &previews);
     void cancelSource();
     void revokeSource();
 
@@ -153,7 +171,12 @@ public:
 
     void openPreview(const ReaderSession &source, QSize size,
                      std::function<void(QString)> finished);
-    void requestAppearance(const appearance::Requested &settings, QSize size = {});
+    // `chapterMode`: 1 shows the chapter only, 0 the whole book, -1 keeps
+    // what is shown. hybridChapterMode goes to the chapter when the
+    // appearance changes and keeps what is shown otherwise.
+    static constexpr int hybridChapterMode = 2;
+    void requestAppearance(const appearance::Requested &settings, QSize size = {},
+                           int chapterMode = -1);
     void editAppearance(const appearance::Patch &patch, QSize size = {});
     std::function<void()> updated;
     RenderProgress renderProgress() const;
@@ -166,6 +189,11 @@ public:
     // queued for this session. Work that may wait, such as preview tiles,
     // starts here instead of on a timer.
     std::function<void()> idle;
+    // The book's background work is done for now: the whole book is shown
+    // and its parsed-book cache is written, or no whole-book layout will
+    // follow, as in Fast or after a build that gave up. Work that would
+    // compete with that work, such as building hidden panels, starts here.
+    std::function<void()> settled;
     bool style(int pixels, int spacing);
     bool style(int pixels, int spacing, const QString &face, int margin);
     bool style(int pixels, int spacing, const QString &face, int margin, const QString &alignment);
@@ -179,10 +207,15 @@ public:
     bool canTurn() const;
     void cancelPendingTurn();
     bool go(int page);
-    bool goTo(const QString &anchor);
+    bool goTo(const QString &anchor, bool keepLayout = false);
+    // Goes to the entry `index` of chapters(). See Engine::goToChapter().
+    bool goToChapter(int index);
+    // Goes to about `fraction` of the whole book, from 0 to 1. With only a
+    // part of the book laid out, the engine lays out the text there first.
+    bool goToFraction(double fraction);
     bool goToNative(const QString &location, std::function<void(QString)> finished);
     bool goToSyncedPosition(const QString &position, std::function<void(QString)> finished);
-    // Resolves chapter, page and source order without navigating or rendering another page.
+    // Resolves chapter, page and source order without changing the displayed page.
     void describeSyncedPosition(const QString &position,
                                 std::function<void(SyncedPositionDescription)> finished);
     void nativePosition(std::function<void(QString, QString)> finished);
@@ -190,13 +223,29 @@ public:
                                std::function<void(PositionComparison)> finished);
 
     // Source and pagination generation. Navigation within the same layout keeps it.
+    int layoutProgressPercent() const { return engine_->progress->percent(); }
     quint64 layoutRevision() const { return newestLayout->load(); }
+
+    // Milliseconds since the opening or the last new layout, which is a new
+    // appearance or page size; -1 before the opening. The Book status field
+    // shows how long the whole book took from there.
+    qint64 layoutMilliseconds() const
+    {
+        if (layoutReadyMilliseconds_ >= 0)
+            return layoutReadyMilliseconds_;
+        return layoutClock_.isValid() ? layoutClock_.elapsed() : -1;
+    }
+
+    // Counts the openings and new layouts that restart that clock.
+    quint64 layoutStarts() const { return layoutStarts_; }
 
     // Bookmark lookups on the engine thread. They report nothing when the
     // layout changed before they finished; the caller asks again.
     void bookmarkLocations(QStringList positions, std::function<void(BookmarkLocations)> finished,
                            bool rangeEndpoints = false, bool sourceOrder = true,
                            std::shared_ptr<std::atomic_bool> cancelled = {});
+    // My Words needs the book page even if Hybrid adopts a prepared layout
+    // during the lookup. Retry on the same open book when its pages are ready.
     void bookmarkPages(QStringList positions, std::function<void(QVector<int>)> finished,
                        bool rangeEndpoints = false);
     void pageSummary(int page, std::function<void(QString position, QString excerpt)> finished);
@@ -208,6 +257,8 @@ public:
     // Renders a bounded thumbnail with saved highlights without moving the reading position. Only
     // the latest request can finish; navigation, reflow and cancellation drop it.
     void previewPage(int page, QSize bounds, std::function<void(QImage)> finished);
+    void previewAdjacentPage(int direction, QSize bounds, QStringList bookmarkPositions,
+                             std::function<void(QImage, bool)> finished);
     void cancelPagePreview();
     // One screen of text in the current layout that starts at the reading position.
     void anchoredPage(bool stayInChapter, std::function<void(QImage)> finished);
@@ -266,7 +317,7 @@ public:
     // delivered only through the typed completion result.
     QString error() const { return frame.error; }
 
-    bool formattingWarning() const { return formattingWarning_; }
+    bool formattingWarning() const { return frame.formattingWarning; }
 
     const storage::CustomPins &customPins() const { return customPins_; }
 
@@ -321,6 +372,49 @@ public:
     int page() const { return frame.state.value("page").toInt(); }
 
     int pages() const { return frame.state.value("pages").toInt(); }
+
+    // Display pages cover the whole book. Local pages still drive navigation and geometry.
+    int bookPage() const
+    {
+        return frame.state.contains("book_fraction") ? frame.state.value("rough_page").toInt() - 1
+                                                     : page();
+    }
+
+    int bookPages() const
+    {
+        return frame.state.contains("book_fraction") ? frame.state.value("rough_pages").toInt()
+                                                     : pages();
+    }
+
+    // True while the pages of the book are an estimate.
+    bool bookPagesEstimated() const
+    {
+        return frame.state.contains("book_fraction")
+                && frame.state.value("rough_pages_estimated").toBool();
+    }
+
+    // The engine has more of the book after its last page: that page is not
+    // the end of the book.
+    bool continuesAfter() const { return frame.state.value("continues_after").toBool(); }
+
+    // The percent of the book that is read. An engine with the text of only
+    // a part of the book gives a rough estimate; otherwise it is the page
+    // count of pageProgressPercent().
+    // The same as a fraction from 0 to 1, for the progress bar.
+    double progressFraction() const
+    {
+        const auto fraction = frame.state.value("book_fraction");
+        return fraction.isDouble() ? qBound(0.0, fraction.toDouble(), 1.0)
+                                   : pageProgressFraction(page(), pages());
+    }
+
+    int progressPercent() const
+    {
+        const auto fraction = frame.state.value("book_fraction");
+        if (fraction.isDouble())
+            return qBound(0, int(fraction.toDouble() * 100), 100);
+        return pageProgressPercent(page(), pages());
+    }
 
     // The page a forward turn reaches, or page() on the last page of the text.
     int nextPage() const { return frame.state.value("next_page").toInt(page()); }
@@ -391,6 +485,10 @@ public:
                     QString preferredPath);
 
     void sleepOverlay(const QStringList &directories, std::function<void(QImage)> finished);
+    // Lists the wallpapers and decodes one image for each entry of `wanted`, a
+    // file name or empty for a random one, on the engine worker.
+    void sleepWallpapers(const QStringList &directories, const QStringList &wanted, QSize bound,
+                         std::function<void(QStringList, QVector<QImage>)> finished);
 
     QString chapterTitle() const { return frame.state.value("chapter_title").toString(); }
 
@@ -415,13 +513,27 @@ public:
     void setChapters(QVector<ChapterTarget> contents, QVector<ChapterTarget> graph);
 
 private:
-    bool formattingWarning_ = false;
+    friend struct ReaderLocationProbe;
+    // Background pagination only offers a document. A foreground render
+    // can adopt it after checking the requested layout and reading position.
+    void showFullDocument(quint64 job);
+    bool currentSourceFrame(quint64 job) const;
+    // `requests` is engineWorkRequests() from when this step was queued:
+    // work that was announced after that is in the queue behind this step,
+    // or will be, and goes first.
+    static void refinePageEstimate(std::shared_ptr<Engine> engine,
+                                   const std::function<bool()> &current,
+                                   QPointer<ReaderSession> guard, quint64 job,
+                                   const std::shared_ptr<SourceLease> &lease, quint64 requests,
+                                   const std::shared_ptr<std::atomic_bool> &count);
+    // Calls `settled` on the GUI thread while the lease is current.
+    static void notifySettled(QPointer<ReaderSession> guard,
+                              const std::shared_ptr<SourceLease> &lease);
     storage::CustomPins customPins_;
-    QJsonObject formattingDetails_;
-    ReaderSession(std::shared_ptr<EngineDocument> retainedEngine, QString placeholderFamily);
+    ReaderSession(std::shared_ptr<Engine> retainedEngine, QString placeholderFamily);
     EngineFontInputs fonts_;
     QString placeholderFamily_;
-    std::shared_ptr<EngineDocument> engine_;
+    std::shared_ptr<Engine> engine_;
     ReaderFrame frame;
     void completeFrameMarkup(ReaderFrame result, quint64 job,
                              const std::shared_ptr<SourceLease> &lease,
@@ -443,21 +555,41 @@ private:
     QString identity_;
     PositionCodec positions_;
     QJsonObject desired;
+    int desiredChapterMode = -1;
+    bool fullDocumentPending_ = false;
     QJsonObject temporaryAppearance;
     appearance::SavedInput originalAppearance;
     QSize desiredSize;
     QString destination;
+    bool keepDestinationLayout = false;
+    // Page turns since the book opened or the appearance changed. Hybrid
+    // rendering counts the pages of the book after a few of them.
+    int quietTurns_ = 0;
+    // The UI sets this while the engine worker can be replacing its document.
+    const std::shared_ptr<std::atomic_bool> backgroundCount_ =
+            std::make_shared<std::atomic_bool>(false);
+    // The entry of chapters() that `destination` is, or -1.
+    int chapterTarget = -1;
     int pageDelta = 0;
     int pageTarget = -1;
+    // A part of the whole book to go to, from 0 to 1, or negative.
+    double fractionTarget = -1;
     bool running = false;
     bool turning = false;
     int pendingTurn = 0;
     bool loadingImage = false;
     bool preview_ = false;
+    bool openingPreview_ = false;
     bool retiring = false;
     bool layoutReady_ = false;
     RenderProgress renderProgress_;
     QElapsedTimer renderTimer;
+    QElapsedTimer layoutClock_;
+    // When a background build of the whole book was ready, or -1. Hybrid
+    // shows that layout from the next turn; its time ends at the build.
+    qint64 layoutReadyMilliseconds_ = -1;
+    quint64 layoutStarts_ = 0;
+    bool switchingMode_ = false;
     void beginRenderProgress(RenderReason reason);
     void clearRenderProgress();
     void loadImages();
@@ -481,6 +613,6 @@ private:
                     std::shared_ptr<std::atomic_bool> cancelled,
                     std::function<void(SearchBatch)> finished, bool reset);
     void request(bool appearanceChange = false, RenderReason reason = RenderReason::Appearance);
-    void dispatch(bool pageTurn = false);
+    void dispatch(bool pageTurn = false, std::function<void()> afterFrame = {});
 };
 } // namespace kobalt

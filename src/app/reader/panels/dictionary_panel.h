@@ -10,6 +10,7 @@
 #include <QLabel>
 #include "ui/dialogs/modals.h"
 #include <QPointer>
+class QLineEdit;
 
 namespace kobalt {
 // A sheet across the full width, fixed to the screen edge away from the word.
@@ -21,7 +22,7 @@ public:
     std::function<void(QString)> chosen;
     std::function<void(QString)> requested, searchRequested;
     std::function<void(const QFont &)> prepareEditorFont;
-    // The My Words cell: a check when the word is saved, a plus otherwise.
+    // The My Words cell uses a checkbox to show whether the word is saved.
     // Hidden while `available` is false, such as without a definition.
     void setSaved(bool saved, bool available = true);
     QWidget *saveActionButton() const;
@@ -46,9 +47,11 @@ protected:
 
 private:
     ui::PagerBar *pages, *choicesPaging;
+    KeyboardFactory keyboardFactory;
     std::unique_ptr<KeyboardController> keyboard;
     // On a narrow sheet, `actions` opens a menu with edit, search and save.
-    ui::CellButton *dictionary, *close, *edit, *submit, *search, *save, *actions;
+    ui::CellButton *dictionary, *close, *edit, *submit, *search, *actions;
+    ui::CheckCellButton *save;
     QPointer<ui::ModalOverlay> actionMenu;
     void openActions();
     bool saved = false, saveAvailable = false;

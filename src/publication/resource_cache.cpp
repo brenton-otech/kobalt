@@ -25,6 +25,14 @@ ResourceCache::ResourceCache(QStringList names, Access access)
 {
 }
 
+std::shared_ptr<ResourceCache> ResourceCache::fresh() const
+{
+    auto result = std::make_shared<ResourceCache>(
+            names_, Access{ loader_, cancelled_, transferStatistics_, imageProbe_ });
+    result->fingerprints_ = fingerprints_;
+    return result;
+}
+
 bool ResourceCache::rebind(const ResourceCache &fresh)
 {
     if (this == &fresh || names_ != fresh.names_ || !fresh.error_.isEmpty()
@@ -146,8 +154,8 @@ ResourceCache::Entry *ResourceCache::ensure(const QString &name, qint64 limit)
             failure_ = Failure::Limit;
             return nullptr;
         }
-        recent_.remove(name);
-        recent_.push_front(name);
+        if (found->second.recent != recent_.begin())
+            recent_.splice(recent_.begin(), recent_, found->second.recent);
         return &found->second;
     }
     if (!contains(name))
@@ -233,6 +241,7 @@ ResourceCache::Entry *ResourceCache::ensure(const QString &name, qint64 limit)
     loadNs_ += transfer.nsecsElapsed();
     fingerprints_[name] = digest;
     recent_.push_front(name);
+    pending.recent = recent_.begin();
     return &entries_.emplace(name, std::move(pending)).first->second;
 }
 

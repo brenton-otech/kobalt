@@ -1,5 +1,6 @@
 #include <QKeyEvent>
 #include "reading/remaining_time.h"
+#include "reading/rendering_mode.h"
 #include "reading/sleep_screen.h"
 #include "ui/controls/buttons.h"
 #include "ui/controls/icons.h"
@@ -91,6 +92,27 @@ kobalt::headerfooter::Values Reader::chromeValues()
     values.chapterPages = session->chapterPages();
     values.page = session->page() + 1;
     values.pages = session->pages();
+    // An engine with the text of only a part of the book shows rough page
+    // numbers from its page estimate. The chapter is the spine item. Before
+    // the estimate has a total, each page field shows its percent form.
+    const auto &state = session->state();
+    if (state.contains("book_fraction") && state.value("rough_pages").toInt() > 0
+        && state.value("rough_item_pages").toInt() > 0) {
+        values.page = state.value("rough_page").toInt();
+        values.pages = state.value("rough_pages").toInt();
+        values.chapterPage = state.value("rough_item_page").toInt();
+        values.chapterPages = state.value("rough_item_pages").toInt();
+        values.pagesEstimated = state.value("rough_pages_estimated").toBool();
+        values.chapterPagesEstimated = state.value("rough_item_pages_estimated").toBool();
+    } else if (state.contains("book_fraction")) {
+        values.page = values.pages = values.chapterPage = values.chapterPages = 0;
+        values.percentTenths = int(session->progressFraction() * 1000);
+        const int itemPages = session->state().value("rough_item_pages").toInt();
+        if (itemPages > 0)
+            values.chapterPercentTenths =
+                    int(1000LL * qBound(1, state.value("rough_item_page").toInt(), itemPages)
+                        / itemPages);
+    }
     const auto battery = services.battery();
     values.battery = battery.percent;
     values.charging = battery.charging;
@@ -100,6 +122,25 @@ kobalt::headerfooter::Values Reader::chromeValues()
     values.bookMilliseconds = estimates.bookMilliseconds;
     values.learningPace = estimates.learningPace;
     values.approximateTime = remainingTime::approximate(preferences);
+    values.decimalPercentages = headerfooter::decimalPercentages(preferences);
+    values.pageTurnMilliseconds = pageTurnMilliseconds;
+    if (state.contains("chapter_load_ms"))
+        values.chapterLoadMilliseconds = qint64(state.value("chapter_load_ms").toDouble());
+    values.wholeBook = !state.contains("book_fraction");
+    values.wholeBookFailed = !values.wholeBook && state.value("whole_book_failed").toBool();
+    // Fast lays out a chapter at a time and never the whole book.
+    values.wholeBookPercent = values.wholeBook || !renderingMode::countsInBackground()
+            ? -1
+            : session->layoutProgressPercent();
+    // The time of the whole book is taken when it first shows after the
+    // opening or a new layout.
+    if (session->layoutStarts() != statusLayout) {
+        statusLayout = session->layoutStarts();
+        statusWholeBookMilliseconds = -1;
+    }
+    if (values.wholeBook && statusWholeBookMilliseconds < 0 && !session->busy())
+        statusWholeBookMilliseconds = session->layoutMilliseconds();
+    values.wholeBookMilliseconds = values.wholeBook ? statusWholeBookMilliseconds : -1;
     return values;
 }
 
@@ -129,6 +170,49 @@ bool Reader::chromeTicks() const
             || field == Field::ChapterTimeLeft || field == Field::BookTimeLeft)
             return true;
     return false;
+}
+
+bool Reader::bookStatusShown() const
+{
+    using namespace kobalt::headerfooter;
+    const auto &layout = page->chrome;
+    for (int slot = 0; slot < slotCount; ++slot)
+        if (layout.slotFields[slot] == Field::BookStatus
+            && (footerSlot(slot) ? layout.footerEnabled : layout.headerEnabled))
+            return true;
+    return false;
+}
+
+void Reader::syncStatusTimer()
+{
+    if (!bookStatusShown() || !isVisible() || lifecycleHidden || closing || services.suspended()) {
+        if (statusTimer)
+            statusTimer->stop();
+        return;
+    }
+    if (!statusTimer) {
+        statusTimer = new QTimer(this);
+        statusTimer->setObjectName("rrBookStatusTimer");
+        statusTimer->setInterval(5000);
+        connect(statusTimer, &QTimer::timeout, this, [this] {
+            if (!bookStatusShown() || !isVisible() || lifecycleHidden || closing
+                || services.suspended()) {
+                statusTimer->stop();
+                return;
+            }
+            // Panels over the page draw their own status; the strips wait.
+            if (topControls->isVisible() || settingsVisible() || dictionaryPanel->isVisible()
+                || searchPanel->isVisible() || linksActive())
+                return;
+            const auto before = page->slotContents;
+            showChapterText();
+            // Like a clock tick, it changes the strips, not the book page.
+            if (page->slotContents != before)
+                page->refreshContent();
+        });
+    }
+    if (!statusTimer->isActive())
+        statusTimer->start();
 }
 
 void Reader::loadChrome()
@@ -184,6 +268,9 @@ void Reader::syncChromeControls()
         if (paceNeeded())
             book->minuteTick();
     }
+    // The Header and footer rows follow the layout once they exist.
+    if (!appearanceBuilt)
+        return;
     const auto values = chromeValues();
     const auto contents = [&values](const Layout &layout) {
         kobalt::reader::SlotContents result;
@@ -220,11 +307,13 @@ void Reader::syncChromeControls()
                          starred ? strings::get("header_footer.preset.modified_name")
                                            .arg(presetLabel(chromePreset))
                                  : presetLabel(chromePreset)));
-    if (fieldChooser->isVisible())
+    if (fieldChooser && fieldChooser->isVisible()) {
+        fieldChooser->debug = features::debugMode(preferences);
         fieldChooser->open(fieldChooser->slot(), current.slotFields[fieldChooser->slot()], values,
                            current.uppercase[fieldChooser->slot()],
                            fieldChooser->slot() < 3 ? page->headerTextPixels()
                                                     : page->footerTextPixels());
+    }
 }
 
 QWidget *Reader::chromeView() const
@@ -240,7 +329,8 @@ void Reader::openHeaderFooterView()
 {
     if (session->temporaryTypography() || !menu->isVisible())
         return;
-    fieldChooser->hide();
+    if (fieldChooser)
+        fieldChooser->hide();
     syncChromeControls();
     headerFooterView->show();
     headerFooterView->raise();
@@ -251,7 +341,8 @@ void Reader::closeChromeViews()
 {
     if (!chromeView())
         return;
-    fieldChooser->hide();
+    if (fieldChooser)
+        fieldChooser->hide();
     headerFooterView->hide();
     refresh();
 }
@@ -261,18 +352,20 @@ void Reader::openFieldChooser(int slot)
     if (session->temporaryTypography() || !menu->isVisible())
         return;
     const auto &current = page->chrome;
-    fieldChooser->open(slot, current.slotFields[slot], chromeValues(), current.uppercase[slot],
-                       slot < 3 ? page->headerTextPixels() : page->footerTextPixels());
+    auto *chooser = ensureFieldChooser();
+    chooser->debug = features::debugMode(preferences);
+    chooser->open(slot, current.slotFields[slot], chromeValues(), current.uppercase[slot],
+                  slot < 3 ? page->headerTextPixels() : page->footerTextPixels());
     headerFooterView->hide();
-    fieldChooser->show();
-    fieldChooser->raise();
+    chooser->show();
+    chooser->raise();
     refresh();
 }
 
 // A choice or the close cell returns to Header and footer.
 void Reader::closeFieldChooser()
 {
-    if (!fieldChooser->isVisible())
+    if (!fieldChooser || !fieldChooser->isVisible())
         return;
     fieldChooser->hide();
     headerFooterView->show();
@@ -289,16 +382,19 @@ void Reader::refreshHostPresentation()
             for (auto *card : presetCards)
                 if (card->preset() == headerfooter::Preset::Phone)
                     card->setVisible(phone);
-            hideTabLabelsOption->setVisible(!phone);
+            if (hideTabLabelsOption)
+                hideTabLabelsOption->setVisible(!phone);
             loadChrome();
             if (choices->isVisible() && choosingTypography)
                 showFontPicker();
         }
     }
-    auto *settings = static_cast<reader::SettingsPanel *>(general);
-    const bool devicePreview = services.devicePreview && services.devicePreview();
-    settings->showDictionaries(services.downloadableDictionaries && !devicePreview);
-    settings->showPowerManagement(wifiPowerSaverVisible());
+    if (general) {
+        auto *settings = static_cast<reader::SettingsPanel *>(general);
+        const bool devicePreview = services.devicePreview && services.devicePreview();
+        settings->showDictionaries(services.downloadableDictionaries && !devicePreview);
+        settings->showPowerManagement(wifiPowerSaverVisible());
+    }
     updateKosyncFeatures();
     updateMenuStatus();
     resizeEvent(nullptr);
@@ -317,6 +413,8 @@ void Reader::openSettings()
     if (session->temporaryTypography())
         return;
     kobalt::ui::PanelTiming timing("settings");
+    ensureSettings();
+    timing.stage("build");
     kosyncPage->setAccount(kosyncClient->server(), kosyncClient->username(),
                            kosyncClient->signedIn(), kosyncClient->automatic());
     kosyncPage->setLastSync(kosyncClient->lastSync());
@@ -331,7 +429,8 @@ void Reader::openSettings()
     lightPopup->hide();
     chapterGraph->hide();
     bookmarkList->hide();
-    acknowledgments->hide();
+    if (acknowledgments)
+        acknowledgments->hide();
     appearanceEdit.clearContinuation();
     restoringDefaults = false;
     restoringPresets = false;
@@ -351,6 +450,8 @@ void Reader::openSettings()
     settingsHeaderFooterWeight = ui::headerFooterAddedWeight();
     settingsTimeRemainingFormat =
             remainingTime::approximate(preferences) ? "approximate" : "detailed";
+    settingsPercentageFormat = headerfooter::decimalPercentages(preferences) ? "decimal" : "whole";
+    settingsRenderingMode = renderingMode::value(renderingMode::fromPreferences(preferences));
     hideTabLabelsOption->setChecked(preferences.value("hide_tab_labels").toBool(false));
     saveWordsOption->setChecked(preferences.value("save_looked_up_words").toBool(true));
     zenModeOption->setChecked(preferences.value("zen_mode").toBool(false));
@@ -364,7 +465,10 @@ void Reader::openSettings()
                         &settingsDictionaryFontFace })
         if (!session->fontFaces().contains(*face))
             face->clear();
+    showDebugSettings();
+    timing.stage("prepare");
     showSettingsFonts();
+    timing.stage("fonts");
     settingsPages->setCurrentIndex(int(SettingsPage::Display));
     resetDefaults->setText(strings::get("reader.restore_appearance_defaults"));
     resetDefaults->setEnabled(true);
@@ -425,6 +529,7 @@ void Reader::openSettings()
     showPageNavigation();
     showTapZones();
     showTappableLinks();
+    showAnnotationInteraction();
     minimalAnnotationOption->setChecked(minimalAnnotationMode());
     showNavigationBarButtons();
     showChapterGroups();
@@ -434,9 +539,16 @@ void Reader::openSettings()
     screenRefreshMode = kobalt::screenRefresh(preferences.value("screen_refresh").toString());
     showScreenRefresh();
     static_cast<SettingsPanel *>(general)->setZenLayout(zenMode());
+    timing.stage("controls");
     fitSettings();
     general->show();
     general->raise();
+    // A panel that was never shown measures its word-wrapped rows too tall,
+    // so fit it again now that it shows. The first fit chose the list or a
+    // section; nothing paints before the event loop runs.
+    fitSettings();
+    timing.stage("fit");
+    // open_ms, below, is the reader's refresh.
     refresh();
     timing.finish(general);
 }
@@ -508,7 +620,7 @@ int Reader::stylingChoice(int feature) const
 void Reader::renderStylingSamples(int requested)
 {
     auto *panel = static_cast<SettingsPanel *>(general);
-    if (!general->isVisible() || panel->settingsPages->currentIndex() != int(SettingsPage::Styling)
+    if (!settingsVisible() || panel->settingsPages->currentIndex() != int(SettingsPage::Styling)
         || page->image.isNull())
         return;
     using Feature = SettingsPanel::AdvancedText;
@@ -654,6 +766,8 @@ void Reader::renderStylingSamples(int requested)
 
 void Reader::fitSettings()
 {
+    if (!general)
+        return;
     const int top = navigation ? navigation->statusHeight()
                                : int(metrics::panel::toolbarHeight - metrics::chrome::actionHeight);
     const int panelHeight =
@@ -688,37 +802,34 @@ void Reader::saveButtonControls(const QJsonObject &actions)
 {
     if (savingButtonControls || savingDarkMode >= 0 || savingDenseGraph)
         return;
-    auto next = appearance::globalPreferences(preferences);
-    appearance::rememberTextLayout(next, session->state());
-    appearance::rememberPageMargins(next, session->state());
-    next[pageButtons::preferenceKey] = actions;
+    const auto before = qt::object(
+            { { pageButtons::preferenceKey, preferences.value(pageButtons::preferenceKey) } });
+    const auto next = qt::object({ { pageButtons::preferenceKey, actions } });
     logSettingChanges(qt::object({ { pageButtons::preferenceKey,
                                      preferences.value(pageButtons::preferenceKey).toObject() } }),
                       qt::object({ { pageButtons::preferenceKey, actions } }));
     savingButtonControls = true;
     static_cast<SettingsPanel *>(general)->buttonControlsButton->setEnabled(false);
-    if (!preferencesWriter)
-        preferencesWriter = std::make_unique<storage::RecordWriter>();
     QPointer<Reader> guard(this);
-    preferencesWriter->post([path = book->paths().preferences(),
-                             next] { return storage::writePreferences(path, next); },
-                            [guard, actions](bool saved) {
-                                qt::invoke(
-                                        QCoreApplication::instance(),
-                                        [guard, actions, saved] {
-                                            if (!guard)
-                                                return;
-                                            guard->savingButtonControls = false;
-                                            saves::settled();
-                                            if (saved)
-                                                guard->preferences[pageButtons::preferenceKey] =
-                                                        actions;
-                                            else
-                                                guard->showSettingsWriteError();
-                                            guard->refresh();
-                                        },
-                                        Qt::QueuedConnection);
-                            });
+    preferencesWriter.post([path = book->paths().preferences(), before,
+                            next] { return storage::updatePreferences(path, before, next); },
+                           [guard, actions](bool saved) {
+                               qt::invoke(
+                                       QCoreApplication::instance(),
+                                       [guard, actions, saved] {
+                                           if (!guard)
+                                               return;
+                                           guard->savingButtonControls = false;
+                                           saves::settled();
+                                           if (saved)
+                                               guard->preferences[pageButtons::preferenceKey] =
+                                                       actions;
+                                           else
+                                               guard->showSettingsWriteError();
+                                           guard->refresh();
+                                       },
+                                       Qt::QueuedConnection);
+                           });
 }
 
 bool Reader::writePreferences(const QJsonObject &next)
@@ -729,16 +840,16 @@ bool Reader::writePreferences(const QJsonObject &next)
     // Known exception: a settings change waits for its write, so each caller
     // can undo the change when the write fails.
     mainthread::AllowBlocking allow("settings write");
+    const auto before = appearance::globalPreferences(preferences);
     auto global = appearance::globalPreferences(next);
     appearance::rememberTextLayout(global, session->state());
     appearance::rememberPageMargins(global, session->state());
     // On the writer thread, after any queued layout memory, so neither write
     // loses the other's change.
-    if (!preferencesWriter)
-        preferencesWriter = std::make_unique<storage::RecordWriter>();
-    ++preferencesWrites;
-    if (!preferencesWriter->writeNow([path = book->paths().preferences(), global] {
-            return kobalt::storage::writePreferences(path, global);
+    if (next.value("zen_stats") != preferences.value("zen_stats"))
+        ++zenStatsWrite;
+    if (!preferencesWriter.writeNow([path = book->paths().preferences(), before, global] {
+            return kobalt::storage::updatePreferences(path, before, global);
         })) {
         showSettingsWriteError();
         return false;
@@ -749,15 +860,15 @@ bool Reader::writePreferences(const QJsonObject &next)
 
 void Reader::applySettings()
 {
-    if (savingButtonControls || savingDarkMode >= 0 || savingDenseGraph
+    // Settings applies the choices in its own controls.
+    if (!general || savingButtonControls || savingDarkMode >= 0 || savingDenseGraph
         || session->temporaryTypography())
         return;
     // Leaving an unanswered confirmation must not select or save defaults.
     static_cast<SettingsPanel *>(general)->dismissRestore();
     static_cast<SettingsPanel *>(general)->dismissStandbyConfirmation();
     static_cast<SettingsPanel *>(general)->dismissAutomaticOpeningConfirmation();
-    // Edits made before the preview opened have no session yet. Apply them
-    // together with these settings once the preview holds them.
+    // Apply the draft and these settings once its preview has opened.
     if (appearanceEdit.queued()
         && appearanceEdit.previewState() == AppearanceEditSession::PreviewState::Opening) {
         appearanceEdit.deferApply();
@@ -772,6 +883,8 @@ void Reader::applySettings()
     next["dictionary_font_size"] = settingsDictionaryFontSize;
     next["header_footer_added_weight"] = settingsHeaderFooterWeight;
     next["hide_tab_labels"] = hideTabLabelsOption->isChecked();
+    next[features::debugModeKey] =
+            static_cast<SettingsPanel *>(general)->debugModeOption->isChecked();
     next["save_looked_up_words"] = saveWordsOption->isChecked();
     next["zen_mode"] = zenModeOption->isChecked();
     if (wifiPowerSaverOption)
@@ -779,6 +892,8 @@ void Reader::applySettings()
     if (disableStandbyOption)
         next[disableReaderStandbyKey] = disableStandbyOption->isChecked();
     next[remainingTime::preferenceKey] = settingsTimeRemainingFormat;
+    next[headerfooter::percentageFormatKey] = settingsPercentageFormat;
+    next[renderingMode::preferenceKey] = settingsRenderingMode;
     for (const auto *key : appearance::fallbackFontKeys)
         next[key] = settingsFontFaces.value(key).toString();
     next["bold_reading"] =
@@ -912,7 +1027,13 @@ void Reader::applySettings()
         for (auto it = defaults.begin(); it != defaults.end(); ++it)
             settings[it.key()] = it.value();
     }
-    session->requestAppearance(requested.edited(appearance::Patch(settings)), bodySize());
+    renderingMode::apply(preferences);
+    const auto rendering = renderingMode::effective(renderingMode::fromPreferences(preferences));
+    session->requestAppearance(requested.edited(appearance::Patch(settings)), bodySize(),
+                               rendering == renderingMode::Mode::Accurate ? 0
+                                       : rendering == renderingMode::Mode::Hybrid
+                                       ? ReaderSession::hybridChapterMode
+                                       : 1);
     applyingText = session->busy();
     if (appearanceEdit.destination() == AppearanceDestination::None)
         appearanceEdit.request(AppearanceDestination::Controls);
@@ -931,42 +1052,38 @@ void Reader::setDenseGraph(bool dense)
         refresh();
         return;
     }
-    auto next = appearance::globalPreferences(preferences);
-    appearance::rememberTextLayout(next, session->state());
-    appearance::rememberPageMargins(next, session->state());
-    next["dense_stats_chart"] = dense;
+    const auto before =
+            qt::object({ { "dense_stats_chart", preferences.value("dense_stats_chart") } });
+    const auto next = qt::object({ { "dense_stats_chart", dense } });
     logSettingChanges(qt::object({ { "dense_stats_chart",
                                      preferences.value("dense_stats_chart").toBool(false) } }),
                       qt::object({ { "dense_stats_chart", dense } }));
     savingDenseGraph = true;
-    if (!preferencesWriter)
-        preferencesWriter = std::make_unique<storage::RecordWriter>();
     QPointer<Reader> guard(this);
-    preferencesWriter->post(
-            [path = book->paths().preferences(), next] {
-                return storage::writePreferences(path, next);
-            },
-            [guard, dense](bool saved) {
-                qt::invoke(
-                        QCoreApplication::instance(),
-                        [guard, dense, saved] {
-                            if (!guard)
-                                return;
-                            guard->savingDenseGraph = false;
-                            saves::settled();
-                            if (saved) {
-                                guard->preferences["dense_stats_chart"] = dense;
-                                guard->denseGraphOption->setChecked(dense);
-                            } else {
-                                guard->chapterGraph->setDense(
-                                        guard->preferences.value("dense_stats_chart")
-                                                .toBool(false));
-                                guard->showSettingsWriteError();
-                            }
-                            guard->refresh();
-                        },
-                        Qt::QueuedConnection);
-            });
+    preferencesWriter.post([path = book->paths().preferences(), before,
+                            next] { return storage::updatePreferences(path, before, next); },
+                           [guard, dense](bool saved) {
+                               qt::invoke(
+                                       QCoreApplication::instance(),
+                                       [guard, dense, saved] {
+                                           if (!guard)
+                                               return;
+                                           guard->savingDenseGraph = false;
+                                           saves::settled();
+                                           if (saved) {
+                                               guard->preferences["dense_stats_chart"] = dense;
+                                               if (guard->denseGraphOption)
+                                                   guard->denseGraphOption->setChecked(dense);
+                                           } else {
+                                               guard->chapterGraph->setDense(
+                                                       guard->preferences.value("dense_stats_chart")
+                                                               .toBool(false));
+                                               guard->showSettingsWriteError();
+                                           }
+                                           guard->refresh();
+                                       },
+                                       Qt::QueuedConnection);
+                           });
     refresh();
 }
 
@@ -983,32 +1100,31 @@ void Reader::toggleZenStats()
     const bool shown = !preferences.value("zen_stats").toBool(false);
     logSettingChanges(qt::object({ { "zen_stats", !shown } }),
                       qt::object({ { "zen_stats", shown } }));
+    const auto before = qt::object({ { "zen_stats", !shown } });
+    const auto next = qt::object({ { "zen_stats", shown } });
     preferences["zen_stats"] = shown;
-    const auto write = ++preferencesWrites;
-    auto next = appearance::globalPreferences(preferences);
-    appearance::rememberTextLayout(next, session->state());
-    appearance::rememberPageMargins(next, session->state());
-    if (!preferencesWriter)
-        preferencesWriter = std::make_unique<storage::RecordWriter>();
+    const auto write = ++zenStatsWrite;
     QPointer<Reader> guard(this);
-    preferencesWriter->post([path = book->paths().preferences(),
-                             next] { return kobalt::storage::writePreferences(path, next); },
-                            [guard, shown, write](bool saved) {
-                                if (saved)
-                                    return;
-                                qt::invoke(
-                                        QCoreApplication::instance(),
-                                        [guard, shown, write] {
-                                            if (!guard || guard->preferencesWrites != write)
-                                                return;
-                                            // A failed save undoes the toggle, as the
-                                            // other settings do.
-                                            guard->preferences["zen_stats"] = !shown;
-                                            guard->showSettingsWriteError();
-                                            guard->syncNavigation();
-                                        },
-                                        Qt::QueuedConnection);
-                            });
+    preferencesWriter.post(
+            [path = book->paths().preferences(), before, next] {
+                return kobalt::storage::updatePreferences(path, before, next);
+            },
+            [guard, shown, write](bool saved) {
+                if (saved)
+                    return;
+                qt::invoke(
+                        QCoreApplication::instance(),
+                        [guard, shown, write] {
+                            if (!guard || guard->zenStatsWrite != write)
+                                return;
+                            // A failed save undoes the toggle, as the
+                            // other settings do.
+                            guard->preferences["zen_stats"] = !shown;
+                            guard->showSettingsWriteError();
+                            guard->syncNavigation();
+                        },
+                        Qt::QueuedConnection);
+            });
     syncNavigation();
 }
 
@@ -1019,43 +1135,42 @@ void Reader::applyDarkMode(bool enabled)
         refresh();
         return;
     }
-    auto next = appearance::globalPreferences(preferences);
-    appearance::rememberTextLayout(next, session->state());
-    appearance::rememberPageMargins(next, session->state());
-    next["dark_mode"] = enabled;
+    const auto before = qt::object({ { "dark_mode", preferences.value("dark_mode") } });
+    const auto next = qt::object({ { "dark_mode", enabled } });
     logSettingChanges(qt::object({ { "dark_mode", preferences.value("dark_mode").toBool(false) } }),
                       qt::object({ { "dark_mode", enabled } }));
     savingDarkMode = enabled;
-    if (!preferencesWriter)
-        preferencesWriter = std::make_unique<storage::RecordWriter>();
     QPointer<Reader> guard(this);
-    preferencesWriter->post([path = book->paths().preferences(),
-                             next] { return kobalt::storage::writePreferences(path, next); },
-                            [guard, enabled](bool saved) {
-                                qt::invoke(
-                                        QCoreApplication::instance(),
-                                        [guard, enabled, saved] {
-                                            if (!guard)
-                                                return;
-                                            auto *reader = guard.data();
-                                            reader->savingDarkMode = -1;
-                                            if (!saved) {
-                                                reader->showSettingsWriteError();
-                                                reader->refresh();
-                                                return;
-                                            }
-                                            reader->preferences["dark_mode"] = enabled;
-                                            reader->settingsError->clear();
-                                            reader->settingsError->hide();
-                                            reader->pendingDarkMode = enabled;
-                                            reader->session->setDarkMode(enabled);
-                                            if (reader->appearanceEdit.preview())
-                                                reader->appearanceEdit.preview()->setDarkMode(
-                                                        enabled);
-                                            reader->refresh();
-                                        },
-                                        Qt::QueuedConnection);
-                            });
+    preferencesWriter.post(
+            [path = book->paths().preferences(), before, next] {
+                return kobalt::storage::updatePreferences(path, before, next);
+            },
+            [guard, enabled](bool saved) {
+                qt::invoke(
+                        QCoreApplication::instance(),
+                        [guard, enabled, saved] {
+                            if (!guard)
+                                return;
+                            auto *reader = guard.data();
+                            reader->savingDarkMode = -1;
+                            if (!saved) {
+                                reader->showSettingsWriteError();
+                                reader->refresh();
+                                return;
+                            }
+                            reader->preferences["dark_mode"] = enabled;
+                            if (reader->settingsError) {
+                                reader->settingsError->clear();
+                                reader->settingsError->hide();
+                            }
+                            reader->pendingDarkMode = enabled;
+                            reader->session->setDarkMode(enabled);
+                            if (reader->appearanceEdit.preview())
+                                reader->appearanceEdit.preview()->setDarkMode(enabled);
+                            reader->refresh();
+                        },
+                        Qt::QueuedConnection);
+            });
     refresh();
 }
 
@@ -1101,6 +1216,18 @@ void Reader::applyAutomaticOpening(bool enabled)
     settingsError->hide();
 }
 
+void Reader::themeWidget(QWidget *widget, const QPalette &colors)
+{
+    // Native controls manage their own source colors and cached icons.
+    for (auto *ancestor = widget; ancestor && ancestor != this; ancestor = ancestor->parentWidget())
+        if (ancestor->property("reader_native_colors").toBool())
+            return;
+    ui::applyReaderPalette(widget, colors);
+    textRefresh(widget);
+    if (auto *button = qobject_cast<QPushButton *>(widget))
+        kobalt::ui::refreshButtonIcon(button);
+}
+
 void Reader::applyTheme(bool dark)
 {
     if (themeReady && darkTheme == dark)
@@ -1113,26 +1240,12 @@ void Reader::applyTheme(bool dark)
     darkTheme = dark;
     // Theme this window only. Nickel keeps its own palette when we close.
     const auto colors = ui::readerPalette(palette(), dark);
-    const auto applyColors = [&colors](QWidget *widget) { ui::applyReaderPalette(widget, colors); };
+    themePalette = colors;
     setProperty("reader_dark", dark);
-    applyColors(this);
+    ui::applyReaderPalette(this, colors);
     textRefresh(this);
-    for (auto *widget : findChildren<QWidget *>()) {
-        // Native controls manage their own source colors and cached icons.
-        bool nativeColors = false;
-        for (auto *ancestor = widget; ancestor && ancestor != this;
-             ancestor = ancestor->parentWidget())
-            if (ancestor->property("reader_native_colors").toBool()) {
-                nativeColors = true;
-                break;
-            }
-        if (nativeColors)
-            continue;
-        applyColors(widget);
-        textRefresh(widget);
-        if (auto *button = qobject_cast<QPushButton *>(widget))
-            kobalt::ui::refreshButtonIcon(button);
-    }
+    for (auto *widget : findChildren<QWidget *>())
+        themeWidget(widget, colors);
     update();
     if (first)
         openingStages["theme_ms"] = theming.nsecsElapsed() / 1e6;
@@ -1238,7 +1351,7 @@ void Reader::selectPanel(int index)
     session->cancelPendingTurn();
     lightPopup->hide();
     chapterGraph->hide();
-    if (general->isVisible()) {
+    if (settingsVisible()) {
         appearanceEdit.request(index == 0 ? AppearanceDestination::Text
                                           : AppearanceDestination::Layout);
         applySettings();
@@ -1259,6 +1372,7 @@ void Reader::openPanel(int index)
         return;
     if (session->busy())
         return;
+    ensureAppearance();
     session->cancelPendingTurn();
     appearanceEdit.cancelDeferredApply();
     // Only the selected font is drawn here. Load the other faces when the
@@ -1272,7 +1386,8 @@ void Reader::openPanel(int index)
     appearanceEdit.setPanelOpen(true);
     appearanceViewport = bodySize();
     appearanceEdit.cancelNavigation();
-    general->hide();
+    if (general)
+        general->hide();
     choices->hide();
     bottomControls->hide();
     topControls->show();
@@ -1292,7 +1407,7 @@ void Reader::openPanel(int index)
 
 void Reader::schedulePreviewWarm()
 {
-    if (!appearanceEdit.panelOpen() || !menu->isVisible() || general->isVisible()
+    if (!appearanceEdit.panelOpen() || !menu->isVisible() || settingsVisible()
         || appearanceEdit.preview() || session->busy() || lifecycleHidden || exitPending)
         return;
     const quint64 panelGeneration = appearanceEdit.panelGeneration();
@@ -1303,7 +1418,7 @@ void Reader::schedulePreviewWarm()
         if (warmScheduledGeneration == panelGeneration)
             warmScheduledGeneration = 0;
         if (appearanceEdit.panelGeneration() != panelGeneration || !appearanceEdit.panelOpen()
-            || !menu->isVisible() || general->isVisible() || appearanceEdit.preview()
+            || !menu->isVisible() || settingsVisible() || appearanceEdit.preview()
             || session->busy() || lifecycleHidden || exitPending)
             return;
         warmAttemptGeneration = panelGeneration;
@@ -1374,8 +1489,7 @@ void Reader::finishPreview()
         refresh();
         return;
     }
-    // A rendering preview already holds the newest request. Only edits made
-    // before it opened must wait for it.
+    // Finish opening the draft before applying it to the reading session.
     if (appearanceEdit.preview() && !appearanceEdit.ready()) {
         appearanceEdit.deferApply();
         return;
@@ -1410,7 +1524,7 @@ void Reader::finishPreview()
 // Continues a Settings or panel apply that waited for the preview to open.
 void Reader::resumeAppearanceApply()
 {
-    if (general->isVisible())
+    if (settingsVisible())
         applySettings();
     else
         finishPreview();
@@ -1459,8 +1573,12 @@ void Reader::applyInterfaceFonts()
 void Reader::showSettingsFonts()
 {
     auto *panel = static_cast<SettingsPanel *>(general);
+    panel->percentageFormatButton->setCaption(
+            SettingsPanel::percentageFormatLabel(settingsPercentageFormat).toUpper());
     panel->timeRemainingFormatButton->setCaption(
             SettingsPanel::timeRemainingFormatLabel(settingsTimeRemainingFormat).toUpper());
+    panel->renderingButton->setCaption(
+            SettingsPanel::renderingModeLabel(settingsRenderingMode).toUpper());
     panel->headerFooterWeightButton->setCaption(
             (settingsHeaderFooterWeight ? strings::get("settings.header_footer_weight_heavier")
                                                   .arg(settingsHeaderFooterWeight)
@@ -1534,7 +1652,7 @@ void Reader::openSettingsFont(const QString &key)
         if (key == appearance::fallbackFontKeys[family])
             index = family;
     if ((!isDefault && !isUi && !isMono && !isHeaderFooter && !isDictionary && index < 0)
-        || !general->isVisible())
+        || !settingsVisible())
         return;
     auto *panel = static_cast<SettingsPanel *>(general);
     const QStringList titles{ strings::get("settings.serif_font"),
