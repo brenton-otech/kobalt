@@ -158,6 +158,7 @@ Normal diagnostics retain events in worker-written batches without a sync for an
 
 The reader also names these lifecycle scopes explicitly:
 
+- `closing Kindle folder browser`: the host is exiting and no reader input can arrive. The destructor stops and joins the folder-listing thread.
 - `closing reader`: the reader is being destroyed and cannot accept input. Its destructor persists the informational KOSync timestamp and requests a diagnostic flush bounded to one second.
 - `opening status before reader input`: the loading view still owns presentation. Nickel's interface-thread API attempts the status-only update once before the reader accepts input.
 - `remembered layout before reader input`: the reader window is still being built. When the opened book's layout, margins or screen density differ from the last layout remembered in the shared settings, `reader-settings.json` is written, so the reader starts from settings that are on disk.

@@ -5,6 +5,7 @@
 # remove the wait. Remove a line when its last scope goes.
 annotation read
 application quits
+closing Kindle folder browser
 closing reader
 final native progress before storage handoff
 host checkpoint
