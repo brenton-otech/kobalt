@@ -1,6 +1,6 @@
 # Keep application/profile identity stable; distinguish only the displayed build
 # and distribution artifact. Pin the exact upstream base, including main builds.
-set(KOBALT_KINDLE_UPSTREAM_COMMIT 679175046d8c806ea3b404525180fbc29a26fcd2)
+set(KOBALT_KINDLE_UPSTREAM_COMMIT be47258850ffdc3295257475afdf8b8f6cb53176)
 function(kobalt_kindle_identity version target revision)
     if(NOT target MATCHES "^(pw5|pw3|colorsoft)$" OR NOT revision MATCHES "^[1-9][0-9]*$" OR revision GREATER 999)
         message(FATAL_ERROR "Expected Kindle target and revision in 1..999")
