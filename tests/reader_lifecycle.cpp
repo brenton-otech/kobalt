@@ -7095,6 +7095,7 @@ private slots:
         }
     }
 
+    // Airplane mode requests a radio change and follows the state the host reports.
     void airplaneModeFollowsReportedRadio()
     {
         ReaderFixture host(testPaths(), testFonts, testPlaceholder);
