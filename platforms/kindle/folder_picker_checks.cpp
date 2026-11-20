@@ -6,6 +6,7 @@
 #include "app/reader_window.h"
 #include "app/reader/views/reading_page.h"
 #include <QCheckBox>
+#include <QLayout>
 #include <QPushButton>
 #include "platforms/standalone/start_screen.h"
 #include "ui/controls/rows.h"
@@ -31,6 +32,30 @@ bool wait(const std::function<bool()> &done)
     return done();
 }
 } // namespace
+
+bool checkBottomInset(Window &window, int expected)
+{
+    auto *reader = window.readerWindow();
+    auto *page =
+            reader ? static_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage")) : nullptr;
+    auto *start = window.startScreen();
+    if (!reader || !page || !reader->layout() || !start) {
+        qCritical("Kindle bottom inset check: reader or Library missing");
+        return false;
+    }
+    const int margin = reader->layout()->contentsMargins().bottom();
+    const int below = reader->height() - page->mapTo(reader, QPoint(0, page->height())).y();
+    const int library = start->contentsMargins().bottom();
+    if (window.bottomInset() != expected || margin != expected || below < expected
+        || library != expected || (expected == 0 && below != 0)) {
+        qCritical("Kindle bottom inset check failed: expected %d, window %d, reader margin %d, "
+                  "below page %d, Library margin %d",
+                  expected, window.bottomInset(), margin, below, library);
+        return false;
+    }
+    qInfo("Kindle bottom inset passed: %d px below the page and the Library", expected);
+    return true;
+}
 
 bool checkWirelessControls(Window &window, const QString &captures)
 {

@@ -9,6 +9,7 @@
 #include "app/library/library_view.h"
 #include "app/reader/views/annotation_exporter.h"
 #include "platform/api/kobo_refresh.h"
+#include "platform/api/safe_area.h"
 #include "ui/style/fonts.h"
 #include <QCloseEvent>
 #include <QDir>
@@ -17,6 +18,7 @@
 #include <QLabel>
 #include <QApplication>
 #include <QWindow>
+#include <QtMath>
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QVBoxLayout>
@@ -46,8 +48,12 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     : device(makeDevice()),
       controller(
               paths, std::move(fonts), std::move(placeholder),
-              [device = device, exports = paths.directory + QStringLiteral("/exports")] {
+              [this, device = device, exports = paths.directory + QStringLiteral("/exports")] {
                   auto services = readerServices(device);
+                  if (bottomBand > 0)
+                      services.safeArea = [band = bottomBand](QSize) {
+                          return SafeArea{ 0, band, 0 };
+                      };
                   services.annotationExporter = [exports](QWidget *reader) {
                       return reader::directoryAnnotationExporter(reader, exports);
                   };
@@ -364,6 +370,22 @@ void Window::setPreviewResolution(const QSize &size)
         previewDimensions = size;
         sizeCanvas();
     }
+}
+
+void Window::setBottomInset(int pixels)
+{
+    bottomBand = qMax(0, pixels);
+    if (bottomBand == 0)
+        return;
+    // The Library and the opening view end above the band; paper fills it.
+    // A reader opened later leaves the band out through its safe area.
+    start->setAutoFillBackground(true);
+    start->setContentsMargins(0, 0, 0, qCeil(bottomBand / devicePixelRatioF()));
+}
+
+QWidget *Window::startScreen() const
+{
+    return start;
 }
 
 QSize Window::readerPixels() const

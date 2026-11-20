@@ -41,6 +41,13 @@ public:
 
     QSize previewResolution() const { return previewDimensions; }
 
+    // Keep text and controls above a bottom band the bezel covers.
+    void setBottomInset(int pixels);
+
+    int bottomInset() const { return bottomBand; }
+
+    QWidget *startScreen() const;
+
     void startDeviceLifecycle();
 #ifdef KOBALT_KINDLE_NATIVE_TESTING
     void simulatePowerEvent(const QByteArray &event);
@@ -73,6 +80,7 @@ private:
     bool deviceFailure = false;
     bool exitFramePending = false, exitFrameReady = false;
     bool preview = false;
+    int bottomBand = 0;
     QSize previewDimensions{ 1072, 1448 };
     QSize readerPixels() const;
     void sizeCanvas();

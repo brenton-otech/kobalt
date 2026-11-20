@@ -188,6 +188,15 @@ come from the framebuffer. The panel's reported 300 PPI matches the screen's
 existing physical-size calculation. The reader enables its color-display
 services when the framebuffer is 32-bit.
 
+The bezel covers the bottom edge of the framebuffer: firmware 5.20.1 reports
+1272×1696 pixels for a 1264×1680 panel, and footer text in the last rows sat
+under the bezel. Colorsoft builds keep text and controls 24 pixels (about 2 mm)
+above the bottom edge. The reader receives this band through the host safe
+area, and paper fills it; the Library and the opening view end above it. The
+value is `colorsoftBottomInset` in `platforms/kindle/display_inset.h`. PW3 and
+PW5 builds use the whole framebuffer, and the package smoke check asserts the
+band for each target.
+
 Power, battery and light controls use the existing LIPC `com.lab126.powerd`
 properties. The battery status fallback already includes KOReader's Colorsoft
 `bd71827_bat` node. Touch input still selects the first multitouch event node.

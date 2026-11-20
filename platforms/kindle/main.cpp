@@ -1,5 +1,6 @@
 #include "window.h"
 #include "folder_picker_checks.h"
+#include "display_inset.h"
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
 #include "ui/style/fonts.h"
@@ -225,6 +226,7 @@ int main(int argc, char **argv)
             ? app.primaryScreen()->geometry().size()
             : deviceSize;
     window.setPreviewResolution(targetSize);
+    window.setBottomInset(kindle::bottomInset(QStringLiteral(KOBALT_KINDLE_TARGET)));
     window.resize(targetSize);
     if (preview) {
         window.setPreview(true);
@@ -313,6 +315,11 @@ int main(int argc, char **argv)
                 if (!state->controlsChecked) {
                     state->controlsChecked = true;
                     poll->stop();
+                    if (!kindle::checkBottomInset(
+                                window, kindle::bottomInset(QStringLiteral(KOBALT_KINDLE_TARGET)))) {
+                        fail(QStringLiteral("Bottom inset regression"));
+                        return;
+                    }
                     if (!kindle::checkWirelessControls(
                                 window, qEnvironmentVariable("KOBALT_KINDLE_CHECK_CAPTURE_DIR"))) {
                         fail(QStringLiteral("Wireless controls regression"));
