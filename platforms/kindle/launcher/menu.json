@@ -4,6 +4,16 @@
             "name": "Start Kobalt prototype",
             "priority": 1,
             "action": "sh /mnt/us/kobalt/launcher/launch.sh"
+        },
+        {
+            "name": "Start Kobalt (pause stock UI)",
+            "priority": 2,
+            "action": "sh /mnt/us/kobalt/launcher/launch.sh --pause-ui"
+        },
+        {
+            "name": "Start Kobalt (stop stock UI)",
+            "priority": 3,
+            "action": "sh /mnt/us/kobalt/launcher/launch.sh --stop-ui"
         }
     ]
 }
