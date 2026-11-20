@@ -4992,6 +4992,11 @@ private slots:
                     const auto text = inkBounds(image, QRect(0, 0, split, image.height()));
                     const auto icon = inkBounds(
                             image, QRect(split, 0, image.width() - split, image.height()));
+                    // An unknown charge hides the whole indicator.
+                    if (percent < 0) {
+                        QVERIFY(text.isEmpty() && icon.isEmpty());
+                        continue;
+                    }
                     QVERIFY(!text.isEmpty() && !icon.isEmpty());
                     const auto context =
                             QString("status %1 charging=%2 scale=%3 text=%4,%5 icon=%6,%7")

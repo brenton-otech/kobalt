@@ -7112,6 +7112,7 @@ private slots:
         QSignalSpy opened(&host, &ReaderFixture::opened);
         host.open(fixture(), nativeSize);
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QVERIFY(buildSettings(host));
         auto *option = host.window()->findChild<QCheckBox *>("rrAirplaneMode");
         QVERIFY(option && host.window()->findChild<QWidget *>("rrSystemWirelessSection"));
         QVERIFY(!option->isChecked());
