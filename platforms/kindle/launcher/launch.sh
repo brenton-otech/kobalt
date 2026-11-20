@@ -2,6 +2,14 @@
 
 # KUAL invokes this wrapper. The supervisor survives both its caller and an app crash.
 set -eu
+# --pause-ui freezes the stock interface while Kobalt runs, as KOReader does,
+# so Home returns almost at once. --stop-ui shuts it down and cold-boots it on
+# exit. Without a flag the packaged default applies.
+UI_MODE=stop
+case "${1:-}" in
+    --pause-ui) UI_MODE=pause; shift ;;
+    --stop-ui) UI_MODE=stop; shift ;;
+esac
 APP_DIR=$(CDPATH='' cd "$(dirname "$0")/.." && pwd -P)
 if [ "$(uname -s)" != Linux ]; then
     echo 'Kobalt Kindle requires Kindle Linux.' >&2
@@ -16,7 +24,9 @@ fi
 [ -x "$APP_DIR/bin/kobalt-power-bridge" ] || { echo 'Kindle power bridge is missing.' >&2; exit 1; }
 [ -f "$APP_DIR/launcher/supervisor.sh" ] || exit 1
 sh "$APP_DIR/launcher/check-storage.sh" "$APP_DIR" || exit 1
-for tool in status start stop nohup usleep readlink ps grep umount lipc-get-prop lipc-set-prop; do
+required_tools='status start stop nohup usleep readlink ps grep umount lipc-get-prop lipc-set-prop'
+[ "$UI_MODE" != pause ] || required_tools="$required_tools pidof cat sed head"
+for tool in $required_tools; do
     command -v "$tool" >/dev/null || { echo "Required Kindle command missing: $tool" >&2; exit 1; }
 done
 
@@ -39,6 +49,6 @@ chmod 700 "$RUN_DIR/power-bridge"
 # Keep the supervisor and its open files on system storage. USB export must
 # not depend on a shell or log descriptor inside /mnt/us.
 cd /
-nohup sh "$RUN_DIR/supervisor.sh" "$APP_DIR" "$RUN_DIR" "$@" >>"$RUN_DIR/launcher.log" 2>&1 </dev/null &
+nohup sh "$RUN_DIR/supervisor.sh" "$APP_DIR" "$RUN_DIR" "$UI_MODE" "$@" >>"$RUN_DIR/launcher.log" 2>&1 </dev/null &
 trap - EXIT
 echo "Kobalt supervisor started: $!"

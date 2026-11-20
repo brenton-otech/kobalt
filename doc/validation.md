@@ -124,6 +124,7 @@ Normal diagnostics retain events in worker-written batches without a sync for an
 
 The reader also names these lifecycle scopes explicitly:
 
+- `closing Kindle folder browser`: the host is exiting and no reader input can arrive. The destructor stops and joins the folder-listing thread.
 - `closing reader`: the reader is being destroyed and cannot accept input. Its destructor persists the informational KOSync timestamp and requests a diagnostic flush bounded to one second.
 - `opening status before reader input`: the loading view still owns presentation. Nickel's interface-thread API attempts the status-only update once before the reader accepts input.
 - `remembered layout before reader input`: the reader window is still being built. When the opened book's layout, margins or screen density differ from the last layout remembered in the shared settings, `reader-settings.json` is written, so the reader starts from settings that are on disk.
@@ -132,7 +133,6 @@ The reader also names these lifecycle scopes explicitly:
 - `wifi-off while closing`: the reader is closing and takes no input. `WirelessManager::off()` turns off Wi-Fi that a cancelled or finished KOSync sync turned on.
 - `application quits`: Qt has ended the event loop, so no input can arrive. The shared profile waits for queued writes and closes. Mac and Android leave this way, and so does Nickel when it quits rather than powers off. `model.main-thread` quits an application while a screen still counts as taking input and checks that the close is not reported and the record survives.
 - `final native progress before storage handoff`: USB or shutdown has stopped reader input and drained pending storage work. Nickel's interface-thread API writes and verifies the final native progress before the handoff continues.
-- `closing Kindle folder browser`: the Kindle host is exiting and takes no input. The folder browser's destructor stops its listing thread.
 - `headless Colorsoft controls capture checkpoint`: a headless package check, not a reading session, saves a wireless-control capture between scripted steps.
 
 These scopes permit waits only at their lifecycle boundaries. They do not permit storage waits during reading. The opening status scope replaces the old native opening-progress write and its retries while reading.

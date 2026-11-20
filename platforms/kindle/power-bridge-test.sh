@@ -27,6 +27,22 @@ grep -q '^ready$' "$scratch/output"
 if grep -q 'overlay-query-timed-out' "$scratch/errors"; then
     echo 'Power bridge still polls the stock screen-overlay service.' >&2; exit 1
 fi
+# A paused stock UI owns com.lab126.kaf. The bridge must listen without
+# claiming that name or publishing the framework's state.
+if ! { sleep 0.2; } | timeout --kill-after=1s 3s env FAKE_DUPLICATE=1 KOBALT_KINDLE_FRAMEWORK_RUNNING=1 "$scratch/bridge" >"$scratch/output" 2>"$scratch/errors"; then
+    cat "$scratch/errors" >&2
+    echo 'Power bridge could not run beside a live framework.' >&2
+    exit 1
+fi
+grep -q '^ready$' "$scratch/output"
+grep -q '^anonymous-client$' "$scratch/errors"
+if grep -q '^registered:' "$scratch/errors"; then
+    echo 'Power bridge published framework state over the live framework.' >&2; exit 1
+fi
+[[ $(grep -c '^defer:2$' "$scratch/errors") == 2 ]]
+# Without an anonymous client it falls back to a private service name, never kaf.
+{ sleep 0.2; } | timeout --kill-after=1s 3s env FAKE_DUPLICATE=1 FAKE_NO_ANONYMOUS_CLIENT=1 KOBALT_KINDLE_FRAMEWORK_RUNNING=1 "$scratch/bridge" >"$scratch/output" 2>"$scratch/errors" && result=0 || result=$?
+[[ $result == 1 ]] && grep -q 'beside the framework: 17' "$scratch/errors"
 for failure in FAKE_DUPLICATE FAKE_SUBSCRIBE_FAIL FAKE_REGISTER_FAIL; do
     result=0
     timeout --kill-after=1s 3s env "$failure=1" "$scratch/bridge" </dev/null >"$scratch/output" 2>"$scratch/errors" || result=$?

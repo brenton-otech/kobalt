@@ -10,7 +10,7 @@ APP=${KOBALT_KPM_APP:-/mnt/us/kobalt}
 DOCUMENTS=${KOBALT_KPM_DOCUMENTS:-/mnt/us/documents}
 RUN_DIR=${KOBALT_KPM_RUN_DIR:-/var/tmp/kobalt-kindle-prototype}
 LIST="$APP/kpm-installed.txt"
-SCRIPTLET=Kobalt.sh
+SCRIPTLETS="Kobalt.sh Kobalt-pause.sh"
 
 if [ -d "$RUN_DIR" ]; then
     echo "Kobalt is running, or its previous supervisor failed ($RUN_DIR). Exit Kobalt first." >&2
@@ -29,7 +29,9 @@ if [ -f "$LIST" ]; then
     rmdir "$APP" 2>/dev/null || echo "Kept $APP/data and $APP/logs."
 fi
 # Leave a scriptlet that the user changed.
-if [ -f "$DOCUMENTS/$SCRIPTLET" ] && [ -f "scriptlets/$SCRIPTLET" ] &&
-    cmp -s "scriptlets/$SCRIPTLET" "$DOCUMENTS/$SCRIPTLET"; then
-    rm -f "$DOCUMENTS/$SCRIPTLET"
-fi
+for scriptlet in $SCRIPTLETS; do
+    if [ -f "$DOCUMENTS/$scriptlet" ] && [ -f "scriptlets/$scriptlet" ] &&
+        cmp -s "scriptlets/$scriptlet" "$DOCUMENTS/$scriptlet"; then
+        rm -f "$DOCUMENTS/$scriptlet"
+    fi
+done

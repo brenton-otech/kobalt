@@ -131,10 +131,10 @@ The description includes the unofficial build label. The hooks are in
   writes `data/` (settings and reading progress) or `logs/`. It records the
   installed files in `/mnt/us/kobalt/kpm-installed.txt` and removes files
   that only an earlier package installed. It copies the `Kobalt.sh`
-  scriptlet to `documents/`.
+  and `Kobalt-pause.sh` scriptlets to `documents/`.
 - `uninstall.sh upgrade`, which KPM runs before an upgrade, keeps the app.
   A full uninstall removes only the recorded files, the directories they
-  leave empty and an unchanged scriptlet. `data/`, `logs/` and any other
+  leave empty and each unchanged scriptlet. `data/`, `logs/` and any other
   file stay.
 - `launch.sh` runs `sh /mnt/us/kobalt/launcher/launch.sh "$@"`, which is the
   same command as the KUAL entry.
@@ -235,9 +235,13 @@ On a Mac, the Colorsoft's USB storage is reached over MTP, for example with
 
    Eject the Kindle, unplug it and open that scriptlet in the Library.
    KPM shows its log on screen. The install hook ends with
-   `Kobalt installed. Open "Kobalt" in the Library to start it.`
+   `Kobalt installed. Open "Kobalt" in the Library to start it, or "Kobalt (pause stock UI)" to keep the stock UI paused.`
 3. Open **Kobalt** in the Library. It is the `documents/Kobalt.sh`
-   scriptlet, and it runs `kpm launch kobalt`.
+   scriptlet, and it runs `kpm launch kobalt`, which stops the stock
+   interface while Kobalt runs. **Kobalt (pause stock UI)**
+   (`documents/Kobalt-pause.sh`) runs `kpm launch kobalt --pause-ui` instead,
+   so Home returns almost at once on exit. See
+   [Stock UI modes](kindle-maintenance.md#stock-ui-modes).
 4. To leave, close any open book with the Library arrow. Then choose **Exit
    Kobalt** from the Library's three-dot menu. The stock interface restarts.
 5. The installed package file is no longer needed. Delete
@@ -256,7 +260,7 @@ choose **Use this folder**. Kobalt scans EPUBs recursively without moving them.
 The Library menu also offers **Open a single book**.
 
 `;kpm uninstall kobalt` removes the app files the package installed and the
-unchanged scriptlet. It keeps `kobalt/data/`, `kobalt/logs/` and any other
+unchanged scriptlets. It keeps `kobalt/data/`, `kobalt/logs/` and any other
 file in `kobalt/`. Delete that folder with OpenMTP to remove everything.
 
 Over SSH, the same steps are `/var/local/kmc/bin/kpm -y uninstall kobalt` and
