@@ -85,11 +85,15 @@ if [[ "$target" == colorsoft ]]; then
         cmp -s "$build/package/documents/$scriptlet" "/work/platforms/kindle/launcher/$scriptlet" \
             || fail "Colorsoft ZIP Library launcher $scriptlet is missing or stale"
     done
+    [[ $(cd "$build/package/documents" && ls -A | sort | tr '\n' ' ') == 'Kobalt-stop.sh Kobalt.sh ' ]] \
+        || fail 'Colorsoft ZIP has unexpected Library scriptlets'
     kpkg=$build/$artifact.kpkg
     [[ -f "$kpkg" ]] || fail 'Colorsoft KPM package missing'
     [[ $(tar -tzf "$kpkg" | head -n 1) == manifest.json ]] || fail 'KPM manifest is not the first entry'
     tar -xzOf "$kpkg" manifest.json | tr -d ' \n' | grep -q '"id":"kobalt".*"supported_platforms":\["kindlehf"\]' \
         || fail 'KPM manifest id or platform mismatch'
+    [[ $(tar -tzf "$kpkg" | grep '^scriptlets/.' | sort | tr '\n' ' ') == 'scriptlets/Kobalt-stop.sh scriptlets/Kobalt.sh ' ]] \
+        || fail 'KPM package has unexpected Library scriptlets'
     for hook in install.sh uninstall.sh launch.sh scriptlets/Kobalt.sh scriptlets/Kobalt-stop.sh; do
         tar -xzOf "$kpkg" "$hook" | cmp -s - "/work/platforms/kindle/kpm/${hook#scriptlets/}" \
             || fail "KPM package has a stale $hook"
