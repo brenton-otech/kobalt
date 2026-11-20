@@ -2013,9 +2013,14 @@ private slots:
                 auto *menu = dynamic_cast<ui::ActionMenu *>(
                         view.findChild<QWidget *>("libraryMoreSheet"));
                 QVERIFY(menu);
-                QCOMPARE(menu->actions().last()->objectName(), QString("libraryMoreAbout"));
-                QCOMPARE(menu->actions().last()->accessibleName(), QString("About Kobalt"));
-                menu->actions().last()->click();
+                // Exit stays hidden without a host exit, so About is the last visible action.
+                auto actions = menu->actions();
+                while (!actions.isEmpty() && actions.last()->isHidden())
+                    actions.removeLast();
+                QVERIFY(!actions.isEmpty());
+                QCOMPARE(actions.last()->objectName(), QString("libraryMoreAbout"));
+                QCOMPARE(actions.last()->accessibleName(), QString("About Kobalt"));
+                actions.last()->click();
                 QVERIFY(!menu->isVisible());
             };
             showAbout();
