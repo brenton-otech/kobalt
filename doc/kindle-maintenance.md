@@ -1,12 +1,15 @@
 # Unofficial Kindle builds
 
-The current Colorsoft port tracks the upstream `v1.0-beta.9` release tag,
-commit `be47258850ffdc3295257475afdf8b8f6cb53176`. It merges that tag into the
-beta.8 Colorsoft port (`28c4b4eb`), which carried the queued stock airplane-mode
-command and the Library scriptlet forward from the previous Colorsoft branch at
-`050b5b2e`. Only Colorsoft is built and validated on this branch. Build metadata
-records the exact upstream revision and the upstream asset version, currently
-beta.9.
+The current Kindle port tracks the upstream `v1.0-beta.9` release tag,
+commit `be47258850ffdc3295257475afdf8b8f6cb53176`. One branch builds the PW3,
+PW5 and Colorsoft targets from one `platforms/kindle/` implementation: it
+merges that tag into the beta.8 Colorsoft port (`28c4b4eb`) and then merges the
+PW3 branch, `platform/kindle-pw3`, which had moved to the same tag. Both
+branches deliver this history by fast-forward. Target-specific parts stay per
+target: the SDK image and toolchain, the firmware fixture, the framebuffer
+path, and packaging, which is a KUAL ZIP for every target plus a KPM package
+for the Colorsoft. Build metadata records the exact upstream revision and the
+upstream asset version, currently beta.9.
 
 The original port starts at Nico Verbruggen's `v1.0-beta.7` tag, commit
 `e86533c80e8aa41bfc7d79c9e445cbd4a6405039`. The original Kindle implementation
@@ -354,3 +357,24 @@ it is now registered in the settings area and opens Settings first, because
 beta 9 builds Settings on first open. The battery alignment check now expects
 a blank indicator for an unknown charge, which the Kindle port hides. Physical
 color, touch, sleep and stock-UI recovery still require device testing.
+
+## Unified Kindle branch validation
+
+After the PW3 merge, `bash platforms/kindle/build.sh` built `pw3`, `pw5` and
+`colorsoft` from the same tree, each in its prepared SDK image
+(`localhost/kobuild:kindle-pw3` for PW3, `localhost/kobuild:kindle` for PW5 and
+Colorsoft). For each target, the SDK adapter targets were built and
+`KOBALT_KINDLE_VERIFY_ADAPTERS=1 bash platforms/kindle/verify-package.sh <target>`
+passed against that target's pinned firmware fixture: the ELF audit with the
+target's floating-point ABI, the power-bridge checks, the display, refresh,
+touch and device IPC regressions, the package comparison, the folder and book
+pickers, the wireless controls and the strict reading smoke. The Colorsoft
+verification also passed its KPM checks. `cmake -P
+platforms/checks/source-checks.cmake` passed after the captain approved the
+Kindle folder-browser and Colorsoft capture `AllowBlocking` reasons.
+
+The full native suite was rebuilt and run in the pinned Linux image. Every
+check passed. Three build-tool checks pass only when the container runs them
+without a global `GIT_DIR` and with `docker run --init`, so that orphaned
+helper processes are reaped. Physical PW3, PW5 and Colorsoft behavior is not
+established by these checks.
