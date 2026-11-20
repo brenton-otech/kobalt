@@ -220,13 +220,20 @@ On a Mac, the Colorsoft's USB storage is reached over MTP, for example with
    `Kobalt-1.0-beta.9-kindle-colorsoft-r1.kpkg` to the top level of the Kindle
    storage, beside `documents/`. Copy DRM-free EPUB files to `documents/`.
    The default library scans that folder recursively.
-2. Eject the Kindle in OpenMTP and unplug it. On the Home screen, tap the
-   search bar and enter:
+2. The stock search bar cannot pass a package path to KPM. Amazon's
+   `scriptExecutor`, which runs `;` commands, accepts only letters, digits,
+   `/`, `-`, `_` and spaces in arguments. It silently drops a command that
+   contains `.` or `:`, so `;kpm install file:///…` returns to Home without
+   running. See [KPM issue #5](https://github.com/KindleModding/KPM/issues/5).
+   Install over SSH, or copy a scriptlet such as `documents/Install Kobalt.sh`
+   that runs:
 
-   ```text
-   ;kpm install file:///mnt/us/Kobalt-1.0-beta.9-kindle-colorsoft-r1.kpkg
+   ```sh
+   #!/bin/sh
+   /var/local/kmc/bin/kpm -y install file:///mnt/us/Kobalt-1.0-beta.9-kindle-colorsoft-r1.kpkg
    ```
 
+   Eject the Kindle, unplug it and open that scriptlet in the Library.
    KPM shows its log on screen. The install hook ends with
    `Kobalt installed. Open "Kobalt" in the Library to start it.`
 3. Open **Kobalt** in the Library. It is the `documents/Kobalt.sh`
@@ -238,7 +245,8 @@ On a Mac, the Colorsoft's USB storage is reached over MTP, for example with
    space back.
 
 To update, copy the new `.kpkg` the same way, then enter
-`;kpm uninstall kobalt` followed by the install command above. The KPM
+`;kpm uninstall kobalt` in the search bar, which needs no `.` or `:`, and run
+the install scriptlet above. The KPM
 version tested refuses a local package over an installed `kobalt` package,
 even a newer one. Uninstalling first is safe, because uninstall keeps
 `kobalt/data/` (settings and reading progress) and `kobalt/logs/`.
@@ -251,9 +259,9 @@ The Library menu also offers **Open a single book**.
 unchanged scriptlet. It keeps `kobalt/data/`, `kobalt/logs/` and any other
 file in `kobalt/`. Delete that folder with OpenMTP to remove everything.
 
-If the search bar does not accept the command, run the same steps over SSH:
+Over SSH, the same steps are `/var/local/kmc/bin/kpm -y uninstall kobalt` and
 `/var/local/kmc/bin/kpm -y install file:///mnt/us/Kobalt-1.0-beta.9-kindle-colorsoft-r1.kpkg`.
-A one-line scriptlet that runs that command from `documents/` also works.
+These checks used KPM 0.2.4, the newest release as of November 2026.
 
 ### With KUAL
 
@@ -365,9 +373,9 @@ Debian container:
 
 Building that CLI outside KMC's toolchain needed the system `sqlite3.h`,
 because the CLI includes it without the subproject's include path. Not
-established: that Véra's search bar passes the `file://` argument through
-unchanged, which KPM version Véra installs, and scriptlet launch on the
-device.
+established: scriptlet launch on the device. Later device evidence showed
+that the search bar does not pass a `file://` argument to KPM (see the KPM
+install steps above), and the Colorsoft's KPM database records KPM 0.2.4.
 
 PW5 still builds and passes `verify-package.sh` against its 5.19.2 fixture.
 At commit `d21d3da`, PW3 also built from a freshly prepared
