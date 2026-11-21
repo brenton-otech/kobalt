@@ -18,6 +18,7 @@ class WidgetCanvas;
 namespace kobalt::kindle {
 class Device;
 class FolderBrowser;
+class Updater;
 
 class Window final : public QWidget
 {
@@ -77,6 +78,7 @@ private:
     QNetworkAccessManager catalogNetwork;
     opds::Browser *catalog;
     bool catalogFolderPending = false;
+    Updater *updater;
     standalone::WidgetCanvas *canvas;
     QLabel *sleepView, *retirementView;
     QTimer standby;

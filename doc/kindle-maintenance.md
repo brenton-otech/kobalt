@@ -156,6 +156,27 @@ the user chooses, and the choice shows only on a settled page. Its buttons ignor
 taps for 800 ms, so a tap meant for a page turn cannot answer it. Neither
 behaviour has a native test yet, and both need a device check.
 
+## Updating from the app
+
+The Library menu has **Check for updates** when Kobalt was started by its
+launcher and KPM is installed. The check runs `kpm list-repo`, reads each
+repository manifest and compares the newest `kobalt` artifact for the platform
+with the package version compiled into the build. It needs Wi-Fi and does not
+turn it on. KPM cannot replace a running Kobalt, so **Update and restart** copies
+`launcher/update.sh` to `/var/tmp/kobalt-update`, starts it detached and closes
+Kobalt. The helper waits up to three minutes for the run folder to go, runs
+`kpm -y install kobalt`, which takes the newest Kobalt and leaves other
+packages alone, and then starts whichever Kobalt is installed, so a failed
+install returns to the old build. The stock Kindle screen shows while the
+package downloads and installs. `logs/update.log` records each step.
+
+KPM upgrades a package only from the repository it was installed from, and
+never one installed from a local file; install Kobalt from the repository once
+for updates to work. `kindle.update-helper` checks the helper with a fake KPM
+and launcher, and `kindle.updater` the listing, manifest and version reading.
+The exit, the detached helper and the relaunch are unproven until a device
+update has run.
+
 ## Catalog
 
 The Library menu has a Catalog entry that browses an OPDS 1 catalog and downloads

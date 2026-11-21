@@ -69,6 +69,11 @@ public:
     void setDark(bool dark);
     void setKeyboardFactory(KeyboardFactory factory);
     void showNotice(const QString &title, const QString &message);
+    // A question with Cancel and one action, for example before an update.
+    void showChoice(const QString &title, const QString &message, const QString &action,
+                    std::function<void()> accepted);
+    // A set checkForUpdates adds Check for updates to the menu.
+    std::function<void()> checkForUpdates;
     // The system back action: closes the topmost layer. False when only the
     // library itself is left.
     bool dismiss();

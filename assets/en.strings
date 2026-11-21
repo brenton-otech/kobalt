@@ -209,6 +209,20 @@
 "library.folder_picker_unavailable" = "This folder is unavailable or cannot be read. Choose another folder.";
 "library.folder_outside_storage" = "Choose a location inside Kindle storage.";
 
+/* update */
+"update.check" = "Check for updates";
+"update.title" = "Kobalt update";
+"update.checking" = "Checking for a newer build…";
+"update.up_to_date" = "Kobalt is up to date.";
+"update.wifi_off" = "Wi-Fi is off. Turn it on to check for updates.";
+"update.no_kpm" = "KPM could not be started, so updates are unavailable.";
+"update.no_repository" = "KPM has no package repository to check.";
+"update.unreachable" = "The package repository could not be reached.";
+/* Arguments: %1 */
+"update.found" = "A newer build is available:\n%1\n\nKobalt closes, installs it and starts again. This can take a few minutes.";
+"update.install" = "Update and restart";
+"update.not_started" = "The update could not be started.";
+
 /* catalog */
 "catalog.title" = "Catalog";
 "catalog.no_account" = "No catalog account yet. Tap the settings button to add one.";

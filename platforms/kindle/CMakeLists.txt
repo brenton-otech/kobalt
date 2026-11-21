@@ -62,7 +62,7 @@ list(FILTER shared EXCLUDE REGEX "/src/scenario/")
 list(FILTER shared EXCLUDE REGEX "/src/engine/blaze/")
 file(GLOB_RECURSE engine_adapter CONFIGURE_DEPENDS "${source}/engine/blaze/adapter/*.cpp" "${source}/engine/blaze/adapter/*.h")
 list(APPEND shared ${engine_adapter})
-set(adapters main.cpp window.cpp window.h folder_browser.cpp folder_browser.h folder_picker_checks.cpp services.cpp services.h display.cpp device.cpp device.h properties.cpp properties.h
+set(adapters main.cpp window.cpp window.h folder_browser.cpp folder_browser.h folder_picker_checks.cpp updater.cpp updater.h services.cpp services.h display.cpp device.cpp device.h properties.cpp properties.h
     ../standalone/reader.cpp ../standalone/reader.h ../standalone/start_screen.cpp ../standalone/start_screen.h)
 list(TRANSFORM adapters PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 qt_add_executable(kobalt_kindle ${shared} ${adapters})
@@ -76,6 +76,9 @@ target_compile_options(kobalt_kindle PRIVATE -Wall -Wextra)
 target_compile_definitions(kobalt_kindle PRIVATE ${kobalt_shared_definitions})
 set_source_files_properties(main.cpp PROPERTIES
     COMPILE_DEFINITIONS "KOBALT_UPSTREAM_VERSION=\"${KOBALT_UPSTREAM_VERSION}\";KOBALT_KINDLE_TARGET=\"${KOBALT_KINDLE_TARGET}\"")
+# The update check compares the repository with this build's own package version.
+set_source_files_properties(updater.cpp PROPERTIES
+    COMPILE_DEFINITIONS "KOBALT_KINDLE_VERSION_MAJOR=${KOBALT_KINDLE_VERSION_MAJOR};KOBALT_KINDLE_VERSION_MINOR=${KOBALT_KINDLE_VERSION_MINOR};KOBALT_KINDLE_VERSION_PATCH=${KOBALT_KINDLE_PACKAGE_REVISION}")
 add_dependencies(kobalt_kindle kobalt-local-engine)
 if(APPLE)
     set(engine "${CRENGINE_BUILD}/libcrengine.a")
@@ -134,6 +137,10 @@ if(KOBALT_KINDLE_ADAPTER_TESTS OR (KOBALT_KINDLE_NATIVE_TESTING AND BUILD_TESTIN
     target_link_libraries(kindle-device-test PRIVATE Qt6::Gui)
     add_executable(kindle-touch-state ${adapter_exclude} qpa/touch_state_test.cpp)
     target_compile_options(kindle-touch-state PRIVATE -Wall -Wextra -Werror)
+    add_executable(kindle-updater ${adapter_exclude} updater_test.cpp updater.cpp updater.h)
+    target_include_directories(kindle-updater PRIVATE "${source}" "${CMAKE_CURRENT_BINARY_DIR}")
+    target_compile_options(kindle-updater PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(kindle-updater PRIVATE Qt6::Core Qt6::Network)
 endif()
 if(UNIX AND NOT APPLE)
     set_target_properties(kobalt-device-info PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
@@ -177,6 +184,9 @@ else()
             "${CMAKE_BINARY_DIR}/test-tmp")
         add_test(NAME kindle.kpm-hooks COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/kpm/hooks-test.sh"
             "${CMAKE_BINARY_DIR}/test-tmp")
+        add_test(NAME kindle.update-helper COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/launcher/update-test.sh")
+        add_test(NAME kindle.updater COMMAND kindle-updater)
+        set_tests_properties(kindle.updater PROPERTIES TIMEOUT 10)
         add_test(NAME kindle.standalone COMMAND "${CMAKE_COMMAND}"
             "-DAPP=$<TARGET_FILE:kobalt_kindle>" "-DROOT=${KOBALT_ROOT}" "-DBUILD=${CMAKE_BINARY_DIR}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/run-smoke.cmake")

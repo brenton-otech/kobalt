@@ -1795,6 +1795,30 @@ void LibraryView::showNotice(const QString &title, const QString &message)
     notice->setFocus();
 }
 
+void LibraryView::showChoice(const QString &title, const QString &message, const QString &action,
+                             std::function<void()> accepted)
+{
+    closeOverlay();
+    auto *modal = new ui::ChoiceModal(this, { message, title, { } },
+                                      { strings::get("common.cancel"), "libraryChoiceCancel" },
+                                      { action, "libraryChoiceAccept" });
+    overlay = modal;
+    connect(modal->secondaryButton(), &QPushButton::clicked, this, &LibraryView::closeOverlay);
+    connect(modal->primaryButton(), &QPushButton::clicked, this, [this, accepted] {
+        closeOverlay();
+        if (accepted)
+            accepted();
+    });
+    modal->dismissed = [this] { closeOverlay(); };
+    setDark(dark);
+    modal->setGeometry(rect());
+    modal->setDimmed(true);
+    modal->fitCard();
+    modal->show();
+    modal->raise();
+    modal->setFocus();
+}
+
 void LibraryView::pageButton(int direction)
 {
     if (!isVisible() || !isEnabled() || overlay || (sortSheet && sortSheet->isVisible())
@@ -2245,6 +2269,10 @@ void LibraryView::showMoreSheet()
             items.append(ui::actionItem(
                     strings::get("library.my_words"), "libraryMoreWords", ui::ControlIcon::Note,
                     [this] { showWords(); }, true));
+        if (checkForUpdates)
+            items.append(ui::actionItem(strings::get("update.check"), "libraryMoreUpdate",
+                                        ui::ControlIcon::Sync,
+                                        [this] { QTimer::singleShot(0, this, checkForUpdates); }));
         items.append(ui::actionItem(
                 strings::get("library.about"), "libraryMoreAbout", ui::ControlIcon::About,
                 [this] { showAbout(); }, true));

@@ -2,6 +2,7 @@
 #include "services.h"
 #include "device.h"
 #include "folder_browser.h"
+#include "updater.h"
 #include "pointer_cancellation.h"
 #include "qpa/sleep_frame.h"
 #include "platforms/standalone/canvas.h"
@@ -180,6 +181,39 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
                                              account.password);
     };
     libraryView->editorKeyboard = readerServices(device).keyboard;
+    // Check for updates: KPM installs the newer package after Kobalt has exited.
+    updater = new Updater(qEnvironmentVariable("KOBALT_KINDLE_HOME"),
+                          qEnvironmentVariable("KOBALT_KINDLE_RUN_DIR"), &catalogNetwork, this);
+    if (updater->available())
+        libraryView->checkForUpdates = [this] {
+            if (!device->state().wifi.enabled) {
+                start->library()->showNotice(strings::get("update.title"),
+                                             strings::get("update.wifi_off"));
+                return;
+            }
+            start->library()->showNotice(strings::get("update.title"),
+                                         strings::get("update.checking"));
+            updater->check();
+        };
+    connect(updater, &Updater::upToDate, this, [this] {
+        start->library()->showNotice(strings::get("update.title"),
+                                     strings::get("update.up_to_date"));
+    });
+    connect(updater, &Updater::failed, this, [this](const QString &message) {
+        start->library()->showNotice(strings::get("update.title"), message);
+    });
+    connect(updater, &Updater::found, this, [this](const QString &description) {
+        start->library()->showChoice(
+                strings::get("update.title"), strings::get("update.found").arg(description),
+                strings::get("update.install"), [this] {
+                    // The helper waits for this exit, updates and starts Kobalt again.
+                    if (updater->start())
+                        close();
+                    else
+                        start->library()->showNotice(strings::get("update.title"),
+                                                     strings::get("update.not_started"));
+                });
+    });
     // The header switch is the stock airplane mode, as in the reader's System settings.
     libraryView->setWifiEnabled = [device = device](bool enabled) {
         device->setWirelessEnabled(enabled);
