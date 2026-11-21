@@ -6,7 +6,8 @@ namespace kobalt::kosync {
 // position every `minutes`: 0 follows page turns with the 30-second check and
 // `neverWhileReading` turns periodic syncs off. The default is 15 minutes.
 // Periodic syncs turn on Wi-Fi only with wakeWifi. Opening, sleep and wake,
-// and closing each have their own switch.
+// and closing each have their own switch. With quietOpen the opening sync
+// runs behind the reader without its Syncing notice.
 inline constexpr int neverWhileReading = -1;
 
 struct Schedule
@@ -14,11 +15,13 @@ struct Schedule
     int minutes = 15;
     bool wakeWifi = false;
     bool onOpen = true, onSleepWake = true, onClose = true;
+    bool quietOpen = false;
 
     bool operator==(const Schedule &other) const
     {
         return minutes == other.minutes && wakeWifi == other.wakeWifi && onOpen == other.onOpen
-                && onSleepWake == other.onSleepWake && onClose == other.onClose;
+                && onSleepWake == other.onSleepWake && onClose == other.onClose
+                && quietOpen == other.quietOpen;
     }
 
     bool operator!=(const Schedule &other) const { return !(*this == other); }

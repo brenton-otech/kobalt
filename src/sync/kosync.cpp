@@ -412,6 +412,7 @@ Client::Client(QString accountPath, QObject *parent, QNetworkAccessManager *netw
     schedule_.onOpen = object.value("sync_on_open").toBool(true);
     schedule_.onSleepWake = object.value("sync_on_sleep_wake").toBool(true);
     schedule_.onClose = object.value("sync_on_close").toBool(true);
+    schedule_.quietOpen = object.value("sync_on_open_quietly").toBool(false);
 }
 
 void Client::observeNetworkState()
@@ -500,6 +501,7 @@ bool writeAccount(const QString &path, const Account &account)
     object["sync_on_open"] = account.schedule.onOpen;
     object["sync_on_sleep_wake"] = account.schedule.onSleepWake;
     object["sync_on_close"] = account.schedule.onClose;
+    object["sync_on_open_quietly"] = account.schedule.quietOpen;
     if (account.lastSync.isValid())
         object["last_sync"] = account.lastSync.toUTC().toString(Qt::ISODate);
     else

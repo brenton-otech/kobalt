@@ -462,6 +462,8 @@ KosyncScheduleSheet::KosyncScheduleSheet(QWidget *parent, bool automatic,
            "kosync.when_reading_description", interval_);
     switchable(ui::ControlIcon::Dictionary, "rrKosyncOnOpen", "kosync.when_open",
                "kosync.when_open_description", &kosync::Schedule::onOpen);
+    switchable(ui::ControlIcon::Hidden, "rrKosyncQuietOpen", "kosync.quiet_open",
+               "kosync.quiet_open_description", &kosync::Schedule::quietOpen);
     // Only a device with a sleep and wake lifecycle offers this moment.
     if (features.sleepWake)
         switchable(ui::ControlIcon::Moon, "rrKosyncOnSleepWake", "kosync.when_sleep_wake",

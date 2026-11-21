@@ -5,9 +5,16 @@
 #include "app/reader/views/kosync_notice.h"
 #include "app/reader/views/sync_choice.h"
 #include <utility>
+#include <QElapsedTimer>
 #include <QLocale>
+#include <memory>
 
 namespace kobalt::reader {
+namespace {
+// How long a position choice from a background check ignores its buttons.
+constexpr int choiceGuardMilliseconds = 800;
+} // namespace
+
 QByteArray Reader::kosyncDocument() const
 {
     return kosyncClient->filenameMatching() ? session->syncFilenameDigest() : session->syncDigest();
@@ -319,11 +326,20 @@ void Reader::requestManualKosync()
     refresh();
 }
 
+// True while the user has the radio off on a host with a Wi-Fi switch. A sync
+// must not turn it back on; it resumes after the user turns Wi-Fi on.
+bool Reader::kosyncRadioOff() const
+{
+    return services.observeWifi && services.setWifiEnabled && !wifiRadioEnabled;
+}
+
 void Reader::prepareKosyncPresentation(std::function<void(bool)> finished)
 {
-    if (kosyncStarted || book->usesNativeCloudSync() || !kosyncClient->signedIn()
-        || !kosyncAutomatic() || !kosyncClient->schedule().onOpen || book->pendingProgress()
-        || book->deviceTransition() || session->pages() <= 0 || session->temporaryTypography()) {
+    // A background opening check starts after the reader is shown, like a periodic sync.
+    if (kosyncRadioOff() || kosyncClient->schedule().quietOpen || kosyncStarted
+        || book->usesNativeCloudSync() || !kosyncClient->signedIn() || !kosyncAutomatic()
+        || !kosyncClient->schedule().onOpen || book->pendingProgress() || book->deviceTransition()
+        || session->pages() <= 0 || session->temporaryTypography()) {
         finished(true);
         return;
     }
@@ -416,6 +432,16 @@ void Reader::synchronizeKosync(bool interactive)
             kosyncStatus(strings::get("kosync.native_sync"));
         return;
     }
+    if (kosyncRadioOff()) {
+        if (interactive)
+            kosyncStatus(strings::get("kosync.wifi_off"));
+        else if (!kosyncStarted) {
+            // The opening sync is skipped; periodic syncs start an interval from now.
+            kosyncStarted = true;
+            kosyncSubmitted = kosyncClock();
+        }
+        return;
+    }
     if (syncCoordinator->pendingProgress()) {
         if (!interactive && !kosyncAutomatic())
             return;
@@ -452,7 +478,7 @@ void Reader::synchronizeKosync(bool interactive)
         return;
     kosyncStarted = true;
     kosyncSubmitted = kosyncClock();
-    if (opening)
+    if (opening && !kosyncClient->schedule().quietOpen)
         showKosyncOpening();
     using Connection = kosync::SyncCoordinator::Connection;
     const auto connection = interactive    ? Connection::Interactive
@@ -557,9 +583,10 @@ void Reader::flushKosync(std::function<void()> finished, bool enabled)
 {
     // Lifecycle policy stays here. The coordinator owns cancellation, the
     // existing connection and the bounded handoff from an older upload.
-    const bool eligible = enabled && !book->usesNativeCloudSync() && kosyncClient->signedIn()
-            && kosyncAutomatic() && !book->pendingProgress() && !session->temporaryTypography()
-            && session->pages() > 0 && !kosyncDocument().isEmpty()
+    const bool eligible = enabled && !kosyncRadioOff() && !book->usesNativeCloudSync()
+            && kosyncClient->signedIn() && kosyncAutomatic() && !book->pendingProgress()
+            && !session->temporaryTypography() && session->pages() > 0
+            && !kosyncDocument().isEmpty()
             && !session->state().value("position").toString().isEmpty();
     syncCoordinator->flush(eligible, std::move(finished));
 }
@@ -577,6 +604,14 @@ void Reader::showKosyncChoice()
         || appearanceEdit.panelOpen())
         return;
     const auto remote = syncCoordinator->candidate();
+    // A choice from a background check can appear as a finger comes down for a
+    // page turn. Its buttons ignore taps for a moment, so that tap cannot answer it.
+    auto shown = std::make_shared<QElapsedTimer>();
+    shown->start();
+    const bool guarded = kosyncClient->schedule().quietOpen;
+    const auto tooSoon = [shown, guarded] {
+        return guarded && shown->elapsed() < choiceGuardMilliseconds;
+    };
     auto *dialog = new ui::ChoiceModal(
             this,
             { strings::get("kosync.comparing_positions"), strings::get("kosync.resume_title"), {} },
@@ -590,7 +625,9 @@ void Reader::showKosyncChoice()
         dialog->deleteLater();
         kosyncDialog = nullptr;
     };
-    const auto keep = [this, dismiss] {
+    const auto keep = [this, dismiss, tooSoon] {
+        if (tooSoon())
+            return;
         syncCoordinator->keepLocal();
         kosyncPositionFailed = false;
         dismiss();
@@ -602,8 +639,8 @@ void Reader::showKosyncChoice()
         kosyncPromptDeferred = true;
         dismiss();
     };
-    connect(dialog->primaryButton(), &QPushButton::clicked, this, [this, remote, dismiss] {
-        if (session->busy() || closing || lifecycleHidden || services.suspended())
+    connect(dialog->primaryButton(), &QPushButton::clicked, this, [this, remote, dismiss, tooSoon] {
+        if (tooSoon() || session->busy() || closing || lifecycleHidden || services.suspended())
             return;
         dismiss();
         if (!session->goToSyncedPosition(remote.position, [this](const QString &error) {
