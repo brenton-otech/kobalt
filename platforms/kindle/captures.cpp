@@ -46,8 +46,8 @@ void captureScreens(Window &window, const QString &book, const QString &director
         auto save = [&](const QString &name) {
             const auto image = window.grab().toImage().convertToFormat(QImage::Format_Grayscale8);
             const auto path = QDir(directory).filePath(name + ".png");
-            if (image.size() != QSize(1236, 1648) || !image.save(path)) {
-                fail(QStringLiteral("Cannot save a PW5 frame to %1").arg(path));
+            if (image.size() != window.previewResolution() || !image.save(path)) {
+                fail(QStringLiteral("Cannot save a device frame to %1").arg(path));
                 return false;
             }
             qInfo().noquote() << "Captured" << path;
@@ -88,6 +88,52 @@ void captureScreens(Window &window, const QString &book, const QString &director
                 return;
             if (state->stage == -3) {
                 if (!save("07-library-more"))
+                    return;
+                auto *start = window.findChild<standalone::StartScreen *>();
+                auto *catalog =
+                        start->library()->findChild<QAbstractButton *>("libraryMoreCatalog");
+                if (!catalog) {
+                    fail(QStringLiteral("Library catalog entry is unavailable"));
+                    return;
+                }
+                catalog->click();
+                state->stage = -4;
+                state->settled.restart();
+            } else if (state->stage == -4) {
+                // The capture profile has no account, so the catalog starts at its account screen.
+                if (!save("08-catalog-account"))
+                    return;
+                auto *address = window.findChild<standalone::StartScreen *>()
+                                        ->library()
+                                        ->findChild<QAbstractButton *>("libraryCatalogAddress");
+                if (!address) {
+                    fail(QStringLiteral("Catalog address field is unavailable"));
+                    return;
+                }
+                address->click();
+                state->stage = -6;
+                state->settled.restart();
+            } else if (state->stage == -6) {
+                if (!save("09-catalog-address"))
+                    return;
+                opds::Listing sample;
+                sample.title = QStringLiteral("Recently added");
+                sample.folder = QStringLiteral("/mnt/us/documents/Catalog");
+                sample.more = true;
+                sample.items = {
+                    { QStringLiteral("Authors"), QStringLiteral("Books by author"), false },
+                    { QStringLiteral("Middlemarch"), QStringLiteral("George Eliot"), true },
+                    { QStringLiteral("The Moonstone"), QStringLiteral("Wilkie Collins"), true },
+                    { QStringLiteral("North and South"), QStringLiteral("Downloading…"), true }
+                };
+                auto *start = window.findChild<standalone::StartScreen *>();
+                start->library()->closeCatalogAccount();
+                start->library()->showCatalog();
+                start->library()->setCatalogListing(sample);
+                state->stage = -5;
+                state->settled.restart();
+            } else if (state->stage == -5) {
+                if (!save("10-catalog"))
                     return;
                 auto *start = window.findChild<standalone::StartScreen *>();
                 start->library()->dismiss();
@@ -200,8 +246,8 @@ void captureScreens(Window &window, const QString &book, const QString &director
                     { "qt", qVersion() },
                     { "commit", kobaltCommit },
                     { "modified", bool(KOBALT_COMMIT_MODIFIED) },
-                    { "width", 1236 },
-                    { "height", 1648 },
+                    { "width", window.previewResolution().width() },
+                    { "height", window.previewResolution().height() },
                     { "fixture_sha256",
                       QString::fromLatin1(QCryptographicHash::hash(fixture.readAll(),
                                                                    QCryptographicHash::Sha256)
