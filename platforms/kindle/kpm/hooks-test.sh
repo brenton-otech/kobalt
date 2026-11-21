@@ -46,6 +46,21 @@ hook uninstall.sh upgrade 2>/dev/null && fail 'upgrade proceeded while Kobalt ru
 hook install.sh upgrade 2>/dev/null && fail 'install proceeded while Kobalt runs'
 hook uninstall.sh 2>/dev/null && fail 'uninstall proceeded while Kobalt runs'
 [ "$(cat "$app/bin/kobalt")" = 'kobalt 1' ] || fail 'a refused hook changed the app'
+# A supervisor that died during its own update no longer permits one.
+sleep 0 &
+dead=$!
+wait "$dead"
+echo "$dead" >"$KOBALT_KPM_RUN_DIR/updating"
+hook install.sh upgrade 2>/dev/null && fail 'a dead supervisor permitted an install'
+echo nonsense >"$KOBALT_KPM_RUN_DIR/updating"
+hook uninstall.sh upgrade 2>/dev/null && fail 'a damaged marker permitted an upgrade'
+# The living supervisor installs while it still holds the run folder.
+echo "$$" >"$KOBALT_KPM_RUN_DIR/updating"
+hook uninstall.sh upgrade >/dev/null || fail 'the supervisor could not upgrade'
+hook install.sh upgrade >/dev/null || fail 'the supervisor could not install'
+[ "$(cat "$app/bin/kobalt")" = 'kobalt 2' ] || fail 'the supervisor update did not replace the app'
+[ ! -e "$app/lib/first" ] || fail 'the supervisor update kept a retired library'
+rm "$KOBALT_KPM_RUN_DIR/updating"
 rmdir "$KOBALT_KPM_RUN_DIR"
 
 # Upgrade: KPM runs the old uninstall hook, then the new install hook.

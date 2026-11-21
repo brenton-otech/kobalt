@@ -38,6 +38,9 @@ public:
 
     bool deviceFailed() const { return deviceFailure; }
 
+    // The user chose to update; the supervisor acts on the exit status.
+    bool updateRequested() const;
+
     bool libraryContains(const QString &path) const;
     void setPreview(bool enabled);
     void setPreviewResolution(const QSize &size);

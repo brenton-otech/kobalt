@@ -16,7 +16,6 @@ const auto kpm = QStringLiteral("/var/local/kmc/bin/kpm");
 const auto package = QStringLiteral("kobalt");
 // The platform of every Kindle package manifest; see kpm/manifest.json.in.
 const auto platform = QStringLiteral("kindlehf");
-const auto helperDirectory = QStringLiteral("/var/tmp/kobalt-update");
 constexpr int transferTimeoutMilliseconds = 30000;
 constexpr int listingTimeoutMilliseconds = 20000;
 } // namespace
@@ -32,8 +31,7 @@ Updater::Updater(QString appDirectory, QString runDirectory, QNetworkAccessManag
 
 bool Updater::available() const
 {
-    return !appDirectory.isEmpty() && !runDirectory.isEmpty() && QFileInfo(kpm).isExecutable()
-            && QFileInfo::exists(appDirectory + QStringLiteral("/launcher/update.sh"));
+    return !appDirectory.isEmpty() && !runDirectory.isEmpty() && QFileInfo(kpm).isExecutable();
 }
 
 QVector<int> Updater::installedVersion()
@@ -164,14 +162,7 @@ bool Updater::start()
 {
     if (!available())
         return false;
-    // The shell copies the helper to system storage and leaves it running, so
-    // no storage is written here and the helper outlives the reader.
-    const auto script =
-            QStringLiteral("mkdir -p \"$3\" && cp \"$1/launcher/update.sh\" \"$3/update.sh\" "
-                           "&& cd / && nohup sh \"$3/update.sh\" \"$1\" \"$2\" "
-                           ">/dev/null 2>&1 </dev/null &");
-    return QProcess::startDetached(QStringLiteral("/bin/sh"),
-                                   { QStringLiteral("-c"), script, QStringLiteral("kobalt-update"),
-                                     appDirectory, runDirectory, helperDirectory });
+    requested_ = true;
+    return true;
 }
 } // namespace kobalt::kindle

@@ -16,6 +16,12 @@ volume_held=no
 volume_pid=
 screensaver_loaded=no
 recovery_complete=no
+# The reader exits with this status to ask for an update and a restart.
+UPDATE_STATUS=75
+KPM=${KOBALT_KPM:-/var/local/kmc/bin/kpm}
+# A stalled download must not hold the paused stock UI for ever. Ten ticks a second.
+UPDATE_TICKS=${KOBALT_UPDATE_TICKS:-9000}
+relaunch=no
 cd / || exit 1
 
 # Every supervisor line carries UTC time, so a device log can be ordered
@@ -245,6 +251,53 @@ recover()
     [ "$waveform_restored" = yes ] || return
     recovery_complete=yes
 }
+# Installs the newest Kobalt while the stock UI stays paused, so no stock
+# screen shows between the old build and the new one. Returns 0 when the
+# installed build can start under this supervisor. KPM's hooks refuse while
+# the run folder exists unless "updating" names this living process.
+apply_update()
+{
+    say 'Update requested; installing with the stock UI paused.'
+    stop_bridge || say 'Could not inspect the power bridge PID.'
+    rm -f "$RUN_DIR/bridge.pid"
+    restore_waveform_mounts
+    if [ ! -x "$KPM" ]; then
+        say "KPM is missing at $KPM; the update was not attempted."
+    else
+        echo "$$" >"$RUN_DIR/updating"
+        # install takes the newest kobalt alone; upgrade would move every package.
+        bounded_stock "$UPDATE_TICKS" "$KPM" -y install kobalt >&2
+        say "kpm install kobalt exited with status $?."
+        rm -f "$RUN_DIR/updating"
+    fi
+    # A failed install can leave no app at all. Then only the stock UI can return.
+    if [ ! -x "$APP_DIR/bin/kobalt" ] || [ ! -x "$APP_DIR/bin/kobalt-power-bridge" ] ||
+       ! sh "$APP_DIR/launcher/check-runtime.sh" "$APP_DIR"; then
+        say 'The installed Kobalt cannot start; returning to the stock UI.'
+        return 1
+    fi
+    # This shell still runs the previous build's supervisor. A build that
+    # changed it starts through its own launcher, after the stock UI returns.
+    if ! cmp -s "$APP_DIR/launcher/supervisor.sh" "$RUN_DIR/supervisor.sh"; then
+        say 'The update changed the supervisor; restarting through the launcher.'
+        relaunch=yes
+        return 1
+    fi
+    if ! cp "$APP_DIR/bin/kobalt-power-bridge" "$RUN_DIR/power-bridge.new" ||
+       ! chmod 700 "$RUN_DIR/power-bridge.new" ||
+       ! mv -f "$RUN_DIR/power-bridge.new" "$RUN_DIR/power-bridge"; then
+        say 'Could not replace the power bridge; restarting through the launcher.'
+        relaunch=yes
+        return 1
+    fi
+    # The Kindle may have shown its screensaver while the update ran.
+    if ! release_overlays; then
+        say 'Could not release stock screen overlays; restarting through the launcher.'
+        relaunch=yes
+        return 1
+    fi
+    return 0
+}
 cleanup()
 {
     recover
@@ -254,8 +307,11 @@ cleanup()
         cat "$RUN_DIR/launcher.log" >>"$APP_DIR/logs/launcher.log" 2>/dev/null || :
     fi
     [ "$recovery_complete" = yes ] || return
-    rm -f "$RUN_DIR/supervisor.sh" "$RUN_DIR/pid" "$RUN_DIR/bridge.pid" "$RUN_DIR/power-bridge" "$RUN_DIR/volume.pid" "$RUN_DIR/launcher.log" "$RUN_DIR/screensaver.loaded" "$RUN_DIR/awesome.pid" "$RUN_DIR/fb.dump"
-    rmdir "$RUN_DIR" || :
+    rm -f "$RUN_DIR/supervisor.sh" "$RUN_DIR/pid" "$RUN_DIR/bridge.pid" "$RUN_DIR/power-bridge" "$RUN_DIR/volume.pid" "$RUN_DIR/launcher.log" "$RUN_DIR/screensaver.loaded" "$RUN_DIR/awesome.pid" "$RUN_DIR/fb.dump" "$RUN_DIR/updating" "$RUN_DIR/power-bridge.new"
+    rmdir "$RUN_DIR" || return
+    if [ "$relaunch" = yes ]; then
+        nohup sh "$APP_DIR/launcher/launch.sh" >>"$APP_DIR/logs/launcher.log" 2>&1 </dev/null &
+    fi
 }
 terminate()
 {
@@ -345,18 +401,25 @@ fi
 log_memory 'with stock UI paused'
 # Stock recovery commands must keep their original library environment even
 # when the app cannot execute or its bundled libraries cannot be mapped.
-QT_QPA_PLATFORM=kindle \
-QT_QPA_PLATFORM_PLUGIN_PATH="$APP_DIR/plugins/platforms" \
-QT_PLUGIN_PATH="$APP_DIR/plugins" \
-QT_QPA_FONTDIR="$APP_DIR/assets/fonts" \
-LD_LIBRARY_PATH="$APP_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-KOBALT_KINDLE_HOME="$APP_DIR" \
-KOBALT_KINDLE_RUN_DIR="$RUN_DIR" \
-KOBALT_KINDLE_POWER_BRIDGE="$RUN_DIR/power-bridge" \
-"$APP_DIR/bin/kobalt" --assets "$APP_DIR/assets" "$@" &
-child=$!
-wait "$child"
-exit_status=$?
-say "Kobalt process exited (status $exit_status)."
-child=
+while :; do
+    QT_QPA_PLATFORM=kindle \
+    QT_QPA_PLATFORM_PLUGIN_PATH="$APP_DIR/plugins/platforms" \
+    QT_PLUGIN_PATH="$APP_DIR/plugins" \
+    QT_QPA_FONTDIR="$APP_DIR/assets/fonts" \
+    LD_LIBRARY_PATH="$APP_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    KOBALT_KINDLE_HOME="$APP_DIR" \
+    KOBALT_KINDLE_RUN_DIR="$RUN_DIR" \
+    KOBALT_KINDLE_POWER_BRIDGE="$RUN_DIR/power-bridge" \
+    "$APP_DIR/bin/kobalt" --assets "$APP_DIR/assets" "$@" &
+    child=$!
+    wait "$child"
+    exit_status=$?
+    say "Kobalt process exited (status $exit_status)."
+    child=
+    [ "$exit_status" = "$UPDATE_STATUS" ] || break
+    # The request itself is not a failure, whatever the update then does.
+    exit_status=0
+    apply_update || break
+    say 'Starting the installed Kobalt.'
+done
 exit "$exit_status"

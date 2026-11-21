@@ -1,3 +1,5 @@
+#include "updater.h"
+#include "system_fonts.h"
 #include "window.h"
 #include "folder_picker_checks.h"
 #include "display_inset.h"
@@ -210,8 +212,10 @@ int main(int argc, char **argv)
         qCritical("Cannot prepare folder picker smoke fixture");
         return 2;
     }
-    kindle::Window window(paths, engineFontInputs(assets, {}, profile + "/fonts"),
-                          placeholderFontFamily(assets, copies), parser.value("library"),
+    auto fonts = engineFontInputs(assets, { }, profile + "/fonts");
+    fonts.sources.systemFiles = kindle::systemFontFiles();
+    kindle::Window window(paths, std::move(fonts), placeholderFontFamily(assets, copies),
+                          parser.value("library"),
                           smoke ? folderCheckRoot : QStringLiteral("/mnt/us"));
     TerminationHandler termination;
     if (!termination.install(window)) {
@@ -442,6 +446,9 @@ int main(int argc, char **argv)
                 window.openBook(book);
         });
     const int result = app.exec();
-    const int exitCode = result != 0 ? result : (window.deviceFailed() ? 1 : 0);
+    const int exitCode = result != 0   ? result
+            : window.deviceFailed()    ? 1
+            : window.updateRequested() ? kindle::Updater::restartStatus
+                                       : 0;
     return exitCode;
 }

@@ -1,3 +1,4 @@
+#include "system_fonts.h"
 #include "services.h"
 #include "device.h"
 #include "ui/style/fonts.h"
@@ -109,7 +110,7 @@ ReaderHostServices readerServices(std::shared_ptr<Device> device)
             return 0;
         }
     };
-    result.fontFamilies = [] { return QStringList{}; };
+    result.fontFamilies = [] { return systemFontFamilies(); };
     result.uiFont = [] { return ui::interfaceFont(); };
     result.suspended = [device] { return device->state().sleeping; };
     result.lightAvailable = [device] { return device->state().hasLight(); };

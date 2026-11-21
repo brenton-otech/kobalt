@@ -11,7 +11,15 @@ RUN_DIR=${KOBALT_KPM_RUN_DIR:-/var/tmp/kobalt-kindle-prototype}
 LIST="$APP/kpm-installed.txt"
 SCRIPTLETS="Kobalt.sh"
 
+# Kobalt's supervisor installs an update itself after the reader has exited.
+# It then names its own process in "updating" and waits for this hook.
+updater=
 if [ -d "$RUN_DIR" ]; then
+    updater=$(cat "$RUN_DIR/updating" 2>/dev/null) || updater=
+    case "$updater" in ''|*[!0-9]*) updater= ;; esac
+    [ -z "$updater" ] || kill -0 "$updater" 2>/dev/null || updater=
+fi
+if [ -d "$RUN_DIR" ] && [ -z "$updater" ]; then
     echo "Kobalt is running, or its previous supervisor failed ($RUN_DIR). Exit Kobalt first." >&2
     exit 1
 fi

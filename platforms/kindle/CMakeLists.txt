@@ -184,7 +184,6 @@ else()
             "${CMAKE_BINARY_DIR}/test-tmp")
         add_test(NAME kindle.kpm-hooks COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/kpm/hooks-test.sh"
             "${CMAKE_BINARY_DIR}/test-tmp")
-        add_test(NAME kindle.update-helper COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/launcher/update-test.sh")
         add_test(NAME kindle.updater COMMAND kindle-updater)
         set_tests_properties(kindle.updater PROPERTIES TIMEOUT 10)
         add_test(NAME kindle.standalone COMMAND "${CMAKE_COMMAND}"

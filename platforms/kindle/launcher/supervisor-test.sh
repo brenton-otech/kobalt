@@ -358,4 +358,83 @@ wait "$supervisor_pid" || result=$?
 [ "$result" = 143 ] && [ ! -e "$TEST_DIR/run" ] && awesome_running
 [ "$(cat "$TEST_DIR/actions")" = app ]
 case "$(ps -o stat= -p "$KINDLE_TEST_VOLUME_PID")" in *T*) exit 1 ;; esac
+
+# An update request: the reader exits with status 75, the supervisor installs
+# with the stock UI still paused and starts the installed build.
+cp "$SUPERVISOR" "$TEST_DIR/app/launcher/supervisor.sh"
+printf '#!/bin/sh\nexit 0\n' >"$TEST_DIR/app/launcher/check-runtime.sh"
+printf '#!/bin/sh\necho launch >>"$KINDLE_TEST_ROOT/actions"\n' >"$TEST_DIR/app/launcher/launch.sh"
+# The reader asks for the update until the fake KPM has installed one.
+write_update_app()
+{
+    cat >"$TEST_DIR/app/bin/kobalt" <<'EOF'
+#!/bin/sh
+case "$(ps -o stat= -p "$KINDLE_TEST_AWESOME_PID")" in *T*) ;; *) exit 92 ;; esac
+echo app >>"$KINDLE_TEST_ROOT/actions"
+mkdir "$KOBALT_KINDLE_RUN_DIR/waveform-abandoned"
+[ -f "$KINDLE_TEST_ROOT/updated" ] || [ "$(grep -c app "$KINDLE_TEST_ROOT/actions")" -ge 2 ] || exit 75
+exit 0
+EOF
+    chmod +x "$TEST_DIR/app/bin/kobalt"
+    printf 'bridge' >"$TEST_DIR/app/bin/kobalt-power-bridge"
+    chmod +x "$TEST_DIR/app/bin/kobalt-power-bridge"
+    rm -f "$TEST_DIR/updated"
+}
+cat >"$TEST_DIR/tools/kpm" <<'EOF'
+#!/bin/sh
+[ "$*" = '-y install kobalt' ] || exit 90
+# The hooks need a living supervisor named in the run folder.
+kill -0 "$(cat "$KINDLE_TEST_ROOT/run/updating")" || exit 91
+case "$(ps -o stat= -p "$KINDLE_TEST_AWESOME_PID")" in *T*) ;; *) exit 92 ;; esac
+echo kpm >>"$KINDLE_TEST_ROOT/actions"
+case "${KINDLE_TEST_UPDATE:-}" in
+    supervisor) echo '# changed' >>"$KINDLE_TEST_ROOT/app/launcher/supervisor.sh" ;;
+    broken) rm -f "$KINDLE_TEST_ROOT/app/bin/kobalt" ;;
+    failed) exit 1 ;;
+esac
+: >"$KINDLE_TEST_ROOT/updated"
+EOF
+chmod +x "$TEST_DIR/tools/kpm"
+export KOBALT_KPM="$TEST_DIR/tools/kpm"
+unset KINDLE_TEST_MODULES KINDLE_TEST_SCREEN_UNLOAD_DELAY KINDLE_TEST_APP_EXIT 2>/dev/null || :
+
+write_update_app
+run_case
+[ "$result" = 0 ] && [ ! -e "$TEST_DIR/run" ]
+[ "$(cat "$TEST_DIR/actions")" = "$(printf 'app\nkpm\napp')" ]
+# The stock UI was paused once and returned once.
+[ "$(cat "$TEST_DIR/pause-actions")" = "$pause_sequence" ]
+[ "$(cat "$TEST_DIR/home-actions")" = home ]
+
+# A failed install starts the build that is still installed.
+write_update_app
+KINDLE_TEST_UPDATE=failed run_case
+[ "$result" = 0 ] && [ ! -e "$TEST_DIR/run" ]
+[ "$(cat "$TEST_DIR/actions")" = "$(printf 'app\nkpm\napp')" ]
+
+# A build with another supervisor starts through its own launcher, after the
+# stock UI has returned and the run folder is gone.
+write_update_app
+KINDLE_TEST_UPDATE=supervisor run_case
+[ "$result" = 0 ] && [ ! -e "$TEST_DIR/run" ]
+attempt=0
+until [ "$(cat "$TEST_DIR/actions")" = "$(printf 'app\nkpm\nlaunch')" ]; do
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt 200 ] || { echo 'The changed build was not relaunched.' >&2; exit 1; }
+    sleep 0.01
+done
+cp "$SUPERVISOR" "$TEST_DIR/app/launcher/supervisor.sh"
+
+# An install that leaves no app returns to the stock UI and starts nothing.
+write_update_app
+KINDLE_TEST_UPDATE=broken run_case
+[ ! -e "$TEST_DIR/run" ]
+[ "$(cat "$TEST_DIR/actions")" = "$(printf 'app\nkpm')" ]
+[ "$(cat "$TEST_DIR/home-actions")" = home ]
+
+# Without KPM the installed build starts again.
+write_update_app
+KOBALT_KPM="$TEST_DIR/no-kpm" run_case
+[ "$result" = 0 ] && [ ! -e "$TEST_DIR/run" ]
+[ "$(cat "$TEST_DIR/actions")" = "$(printf 'app\napp')" ]
 echo 'Kindle supervisor checks passed.'

@@ -181,7 +181,7 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
                                              account.password);
     };
     libraryView->editorKeyboard = readerServices(device).keyboard;
-    // Check for updates: KPM installs the newer package after Kobalt has exited.
+    // Check for updates: the supervisor installs the newer package after Kobalt has exited.
     updater = new Updater(qEnvironmentVariable("KOBALT_KINDLE_HOME"),
                           qEnvironmentVariable("KOBALT_KINDLE_RUN_DIR"), &catalogNetwork, this);
     if (updater->available())
@@ -206,10 +206,14 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
         start->library()->showChoice(
                 strings::get("update.title"), strings::get("update.found").arg(description),
                 strings::get("update.install"), [this] {
-                    // The helper waits for this exit, updates and starts Kobalt again.
-                    if (updater->start())
-                        close();
-                    else
+                    // The supervisor installs the update after this exit and starts
+                    // Kobalt again. This notice stays on the panel meanwhile, so
+                    // leave time for it to be drawn.
+                    if (updater->start()) {
+                        start->library()->showNotice(strings::get("update.title"),
+                                                     strings::get("update.installing"));
+                        QTimer::singleShot(1500, this, [this] { close(); });
+                    } else
                         start->library()->showNotice(strings::get("update.title"),
                                                      strings::get("update.not_started"));
                 });
@@ -403,6 +407,11 @@ void Window::simulateBattery(int percent, bool charging)
     device->simulateBattery(percent, charging);
 }
 #endif
+bool Window::updateRequested() const
+{
+    return updater->requested();
+}
+
 void Window::updateSleepView()
 {
     if (!device->state().sleeping)

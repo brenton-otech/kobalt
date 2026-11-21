@@ -8,8 +8,9 @@ class QNetworkAccessManager;
 
 namespace kobalt::kindle {
 // Looks for a newer Kobalt package in the repositories that KPM knows, and
-// hands an update to the helper that runs after Kobalt has exited. KPM cannot
-// replace a running Kobalt, so the app never updates itself in place.
+// asks the launcher's supervisor for it. KPM cannot replace a running Kobalt:
+// the reader exits with restartStatus, and the supervisor, which keeps the
+// stock UI paused, installs the package and starts the new build.
 class Updater final : public QObject
 {
     Q_OBJECT
@@ -30,8 +31,14 @@ public:
     // Asks KPM for its repositories and reads each manifest. Exactly one of
     // upToDate, found and failed follows.
     void check();
-    // Starts the helper. The caller then closes Kobalt; the helper waits for that.
+    // Records the request. The caller then closes Kobalt, and main returns
+    // restartStatus when requested() is true.
     bool start();
+
+    bool requested() const { return requested_; }
+
+    // Matches UPDATE_STATUS in launcher/supervisor.sh.
+    static constexpr int restartStatus = 75;
 
     // The manifest addresses in the output of "kpm list-repo".
     static QVector<QUrl> repositories(const QString &listing);
@@ -52,7 +59,7 @@ private:
     QNetworkAccessManager *network;
     quint64 generation = 0;
     int pending = 0;
-    bool reached = false;
+    bool reached = false, requested_ = false;
     Candidate best;
     void finish();
 };
