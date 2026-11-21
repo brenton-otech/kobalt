@@ -90,7 +90,7 @@ configure_file("${source}/support/build_info.h.in" build_info.h @ONLY)
 file(GLOB_RECURSE shared CONFIGURE_DEPENDS
     "${source}/dictionaries/*.cpp" "${source}/engine/*.cpp"
     "${source}/library/*.cpp" "${source}/render/*.cpp"
-    "${source}/reading/*.cpp" "${source}/storage/*.cpp" "${source}/sync/*.cpp")
+    "${source}/opds/*.cpp" "${source}/reading/*.cpp" "${source}/storage/*.cpp" "${source}/sync/*.cpp")
 # The rendering library has its own target and compiler options.
 list(FILTER shared EXCLUDE REGEX "/src/engine/blaze/")
 file(GLOB_RECURSE engine_adapter CONFIGURE_DEPENDS "${source}/engine/blaze/adapter/*.cpp")
@@ -764,7 +764,7 @@ if(BUILD_TESTING)
     endfunction()
     kobalt_regressions(model storage_assets android_assets android_light profile_storage record_writer main_thread reading_history bookmark_store custom_pins highlight_store annotation_database appearance_settings text_presets header_footer
         layout_cache resource_cache layout_compatibility reading_pace reading_speed engine_activity
-        local_resources zip_resource diagnostics crash_reports dictionary_store image_damage page_pixels
+        local_resources zip_resource diagnostics crash_reports dictionary_store opds_feed opds_browser image_damage page_pixels
         logical_word_counter brightness_gesture qt_compat page_refresh_regions screen_refresh plain_archive reading_progress
         library kosync sync_coordinator annotation_draft chapter_progress style_sample_cache preview_store save_wait saved_words reading_activity)
     kobalt_regressions(model font_axes touch_rotation)
