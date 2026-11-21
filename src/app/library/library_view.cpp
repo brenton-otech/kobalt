@@ -2261,8 +2261,13 @@ void LibraryView::paintEvent(QPaintEvent *event)
         return;
     const int bar = chrome::actionHeight - chrome::heavyRule;
     const int left = chrome::inset;
-    // Search and More take the right of the header, after the Wi-Fi switch.
-    const int right = width() - (wifiShown ? 3 : 2) * chrome::cellWidth - chrome::inset;
+    // The title and count end before the leftmost header button: Search, or
+    // the dark mode and Wi-Fi switches that arrange() places left of it.
+    int buttons = search->x();
+    for (const QWidget *button : { static_cast<QWidget *>(night), static_cast<QWidget *>(wifi) })
+        if (button->isVisibleTo(this))
+            buttons = qMin(buttons, button->x());
+    const int right = buttons - chrome::inset;
     auto titleFont = ui::brandFont(chrome::titleText);
     painter.setFont(titleFont);
     painter.setPen(ink);

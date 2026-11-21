@@ -6281,6 +6281,45 @@ printf '[{"file":"%s.png","scene":"%s"}]' "$3" "$KOBALT_GALLERY_CAPTURE" > "$2/p
         }
     }
 
+    // With the dark mode and Wi-Fi switches beside Search, the book count
+    // ends before them instead of being painted underneath.
+    void libraryCountBesideSwitches()
+    {
+        Fixture fixture(false, false, true, true);
+        QVERIFY(fixture.prepared);
+        auto *start = fixture.window.findChild<standalone::StartScreen *>();
+        QVERIFY(start);
+        fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(1);
+        start->showLibrary();
+        auto *view = start->library();
+        auto *canvas = start->libraryCanvas();
+        QTRY_VERIFY(view->isVisible() && view->size() == canvas->sceneRect().size().toSize()
+                    && view->width() == 1072);
+        view->setDarkMode = [](bool) { };
+        view->setWifiEnabled = [](bool) { };
+        view->setWifi(true, true, 3);
+        auto *wifi = view->findChild<QWidget *>("libraryWifi");
+        auto *search = view->findChild<QWidget *>("librarySearch");
+        QVERIFY(wifi && search);
+        QTRY_VERIFY(wifi->isVisible());
+        QVERIFY(wifi->x() < search->x() - ui::metrics::chrome::cellWidth);
+        // The view's own paint, without its buttons, has the count's ink
+        // left of the switches and none from Wi-Fi to Search.
+        const int bar = ui::metrics::chrome::actionHeight - ui::metrics::chrome::heavyRule;
+        QImage image(view->width(), bar, QImage::Format_RGB32);
+        image.fill(Qt::white);
+        view->render(&image, {}, QRegion(0, 0, view->width(), bar), QWidget::DrawWindowBackground);
+        const auto inked = [&image](int from, int to) {
+            for (int x = from; x < to; ++x)
+                for (int y = 0; y < image.height(); ++y)
+                    if (qGray(image.pixel(x, y)) < 200)
+                        return true;
+            return false;
+        };
+        QVERIFY2(inked(wifi->x() - ui::px(160), wifi->x()), "the book count is missing");
+        QVERIFY2(!inked(wifi->x(), search->x()), "the book count is under the switches");
+    }
+
     void libraryHold()
     {
         // Holding a book opens its menu in every view, through the canvas as
