@@ -406,6 +406,7 @@ private:
     void requestManualKosync();
     void updateKosyncToolbar();
     void synchronizeKosync(bool interactive = false);
+    bool kosyncRadioOff() const;
     QByteArray kosyncDocument() const;
     double kosyncPercentage() const;
     void prepareKosyncPresentation(std::function<void(bool)> finished);
@@ -534,6 +535,7 @@ private:
     kobalt::ui::BatteryIndicator *menuBattery;
     kobalt::ui::BluetoothIndicator *menuBluetooth;
     kobalt::ui::WifiIndicator *menuWifi;
+    QAbstractButton *menuWifiSwitch;
     kobalt::ReadingPage *page;
     ChapterHeader *header;
     AppearanceSheet *menu;

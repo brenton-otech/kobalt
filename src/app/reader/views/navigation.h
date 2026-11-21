@@ -34,6 +34,8 @@ struct ToolbarComposition
     ui::BatteryIndicator *battery = nullptr;
     ui::BluetoothIndicator *bluetooth = nullptr;
     ui::WifiIndicator *wifi = nullptr;
+    // Optional: makes the Wi-Fi mark a switch while it is enabled.
+    QAbstractButton *wifiSwitch = nullptr;
     QPushButton *formattingWarning = nullptr;
     QPushButton *search = nullptr, *sync = nullptr;
 };
@@ -221,6 +223,7 @@ private:
     ui::BatteryIndicator *battery;
     ui::BluetoothIndicator *bluetooth;
     ui::WifiIndicator *wifi;
+    QAbstractButton *wifiSwitch;
     QPushButton *formattingWarning;
     QPushButton *search, *sync;
     QString searchStyle, syncStyle;

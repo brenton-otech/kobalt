@@ -33,6 +33,7 @@ class SortSheet;
 class FolderPicker;
 class CatalogPage;
 class CatalogAccountPage;
+class WifiCell;
 
 struct FolderLocation
 {
@@ -74,6 +75,11 @@ public:
     void pageButton(int direction);
     // With download set, the picker chooses the catalog download folder and
     // reports it through chooseDownloadFolder.
+    // The Wi-Fi switch in the header, for hosts that control the radio. The
+    // host reports the radio state; a tap asks for the opposite state.
+    void setWifi(bool enabled, bool connected, int strength);
+    void hideWifi();
+    std::function<void(bool enabled)> setWifiEnabled;
     void showFolderPicker(const QString &path, bool books = false, bool download = false);
 
     void showBookPicker(const QString &path) { showFolderPicker(path, true); }
@@ -132,6 +138,8 @@ private:
     const Index &index;
     std::function<QString(const QString &)> coverPath;
     ui::CellButton *search, *more, *closeSearch;
+    WifiCell *wifi;
+    bool wifiShown = false, wifiEnabled = false;
     QVector<ui::CellButton *> modes;
     QLineEdit *query;
     std::unique_ptr<KeyboardController> keyboard;

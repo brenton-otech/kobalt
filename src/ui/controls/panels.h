@@ -1,6 +1,7 @@
 #pragma once
 #include "ui/style/theme.h"
 #include "text.h"
+#include <QAbstractButton>
 #include <QFrame>
 #include <QFont>
 #include <QLabel>
@@ -163,6 +164,16 @@ protected:
 
 private:
     bool enabled = false;
+};
+
+// An unpainted button over a status mark, so a small mark has a finger-sized target.
+class TapArea final : public QAbstractButton
+{
+public:
+    explicit TapArea(QWidget *parent) : QAbstractButton(parent) { setFocusPolicy(Qt::NoFocus); }
+
+protected:
+    void paintEvent(QPaintEvent *) override { }
 };
 
 class WifiIndicator final : public QWidget

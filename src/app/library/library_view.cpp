@@ -672,6 +672,39 @@ private:
     QVector<QWidget *> groups;
 };
 
+// The header's Wi-Fi switch. The signal marks have their own painter, which the
+// cell's icon does not use, so the cell paints its frame and the mark on top.
+class WifiCell final : public ui::CellButton
+{
+public:
+    explicit WifiCell(QWidget *parent) : ui::CellButton(ui::ControlIcon::WifiDisconnected, parent)
+    {
+    }
+
+    void setMark(ui::ControlIcon value)
+    {
+        mark = value;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *event) override
+    {
+        ui::CellButton::paintEvent(event);
+        QPainter painter(this);
+        // The painter fits the mark to a status-bar height; a larger square
+        // brings it to the weight of the neighbouring Search icon.
+        const int side = chrome::cellIcon * 4 / 3;
+        // A pressed cell fills with ink, so its mark takes the paper colour.
+        ui::paintWifiStatusIcon(
+                painter, mark, QRectF((width() - side) / 2., (height() - side) / 2., side, side),
+                palette().color(isDown() ? QPalette::Window : QPalette::WindowText));
+    }
+
+private:
+    ui::ControlIcon mark = ui::ControlIcon::WifiDisconnected;
+};
+
 // A host-backed folder browser. Its header, rows and primary action match
 // Library folders; enumerating storage belongs to the host's worker.
 class FolderPicker final : public ui::Panel
@@ -1495,6 +1528,15 @@ LibraryView::LibraryView(const Index &index, std::function<QString(const QString
     closeSearch = cell(ui::ControlIcon::Close, "libraryCloseSearch",
                        strings::get("library.close_search"));
     closeSearch->hide();
+    wifi = new WifiCell(this);
+    wifi->setObjectName("libraryWifi");
+    wifi->setAccessibleName(strings::get("library.wifi_turn_on"));
+    wifi->setRule(Qt::LeftEdge);
+    wifi->hide();
+    connect(wifi, &QPushButton::clicked, this, [this] {
+        if (setWifiEnabled)
+            setWifiEnabled(!wifiEnabled);
+    });
     query = new QLineEdit(this);
     kobalt::ui::prepareNativeEditor(query);
     query->setObjectName("librarySearchQuery");
@@ -1840,6 +1882,30 @@ void LibraryView::applySettings(const Settings &settings)
     rebuild(false);
 }
 
+void LibraryView::setWifi(bool enabled, bool connected, int strength)
+{
+    const ui::ControlIcon levels[] = { ui::ControlIcon::WifiNone, ui::ControlIcon::WifiLow,
+                                       ui::ControlIcon::WifiMedium, ui::ControlIcon::WifiHigh };
+    // Off shows the struck-through mark; on shows the signal, as the reader's status does.
+    wifi->setMark(!enabled ? ui::ControlIcon::WifiDisconnected
+                          : !connected || strength < 0
+                          ? ui::ControlIcon::WifiNone
+                          : levels[qBound(0, (strength * 3 + 2) / 4, 3)]);
+    wifi->setAccessibleName(
+            strings::get(enabled ? "library.wifi_turn_off" : "library.wifi_turn_on"));
+    wifiEnabled = enabled;
+    if (!std::exchange(wifiShown, true))
+        arrange();
+    QWidget::update();
+}
+
+void LibraryView::hideWifi()
+{
+    if (std::exchange(wifiShown, false))
+        arrange();
+    QWidget::update();
+}
+
 void LibraryView::setSearching(bool value)
 {
     searching = value;
@@ -1944,6 +2010,9 @@ void LibraryView::arrange()
     x -= chrome::cellWidth;
     (searching ? static_cast<QWidget *>(closeSearch) : static_cast<QWidget *>(search))
             ->setGeometry(x, 0, chrome::cellWidth, bar);
+    wifi->setVisible(wifiShown && !searching);
+    if (wifiShown && !searching)
+        wifi->setGeometry(x - chrome::cellWidth, 0, chrome::cellWidth, bar);
     const int left = 0;
     query->setGeometry(left, 0, qMax(1, x - left), bar);
     query->setTextMargins(chrome::inset, 0, chrome::inset, 0);
@@ -2014,8 +2083,8 @@ void LibraryView::paintEvent(QPaintEvent *event)
         return;
     const int bar = chrome::actionHeight - chrome::heavyRule;
     const int left = chrome::inset;
-    // Search and More take the right of the header.
-    const int right = width() - 2 * chrome::cellWidth - chrome::inset;
+    // Search and More take the right of the header, after the Wi-Fi switch.
+    const int right = width() - (wifiShown ? 3 : 2) * chrome::cellWidth - chrome::inset;
     auto titleFont = ui::brandFont(chrome::titleText);
     painter.setFont(titleFont);
     painter.setPen(ink);

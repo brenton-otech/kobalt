@@ -2,12 +2,14 @@
 #include <QJsonObject>
 
 namespace kobalt::features {
-inline constexpr const char *keys[] = { "disable_navigate",       "disable_stats",
-                                        "disable_annotations",    "disable_bookmarks",
-                                        "disable_kosync",         "disable_words",
-                                        "disable_highlight_links" };
+inline constexpr const char *keys[] = { "disable_navigate",        "disable_stats",
+                                        "disable_annotations",     "disable_bookmarks",
+                                        "disable_kosync",          "disable_words",
+                                        "disable_highlight_links", "disable_wifi_switch" };
 
-enum Feature { Navigate, Stats, Annotations, Bookmarks, Kosync, Words, HighlightLinks };
+// WifiSwitch is the tappable Wi-Fi mark of the reading menu and the Library
+// header. Only hosts that control the radio offer it.
+enum Feature { Navigate, Stats, Annotations, Bookmarks, Kosync, Words, HighlightLinks, WifiSwitch };
 
 // Settings > System > Developer. Debug mode shows the Debug tab, the debug
 // fields of the header and footer picker and the Fast rendering engine.

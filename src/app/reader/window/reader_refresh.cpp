@@ -731,6 +731,14 @@ void Reader::syncReadingControls()
         if (action)
             action->setVisible(!settingsOpen);
     toolbarComposition.search->setVisible(!settingsOpen && !zen);
+    // The Wi-Fi mark is a switch where the host controls the radio and the feature is shown.
+    const bool wifiSwitchable = services.observeWifi && services.setWifiEnabled
+            && features::enabled(preferences, features::WifiSwitch);
+    if (menuWifiSwitch->isEnabled() != wifiSwitchable) {
+        menuWifiSwitch->setEnabled(wifiSwitchable);
+        if (topControls->isVisible() && !lifecycleHidden)
+            syncNavigation();
+    }
     const bool bookmarksShown = features::enabled(preferences, features::Bookmarks);
     const bool annotationsShown = features::enabled(preferences, features::Annotations);
     const bool wordsShown = savedWords && features::enabled(preferences, features::Words);

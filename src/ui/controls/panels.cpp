@@ -271,9 +271,11 @@ void WifiIndicator::paintEvent(QPaintEvent *)
     const ControlIcon levels[] = { ControlIcon::WifiNone, ControlIcon::WifiLow,
                                    ControlIcon::WifiMedium, ControlIcon::WifiHigh };
     // Map Nickel's 0..4 reports to Phosphor's four signal silhouettes.
-    const auto icon = !connected ? ControlIcon::WifiDisconnected
-            : strength < 0       ? ControlIcon::WifiNone
-                                 : levels[(strength * 3 + 2) / 4];
+    // The struck-through mark means the radio is off; a radio that is on but
+    // not connected yet shows the empty signal.
+    const auto icon = !enabled           ? ControlIcon::WifiDisconnected
+            : !connected || strength < 0 ? ControlIcon::WifiNone
+                                         : levels[(strength * 3 + 2) / 4];
     paintWifiStatusIcon(painter, icon, QRectF(0, (height() - side) / 2. - px(1), width(), side),
                         palette().color(QPalette::WindowText));
 }

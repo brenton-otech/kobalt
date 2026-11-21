@@ -2717,12 +2717,14 @@ void SettingsPanel::showDebug(bool visible)
 
 void SettingsPanel::updateFeatureOptions()
 {
-    const char *names[] = { "navigate", "stats", "annotations",    "bookmarks",
-                            "kosync",   "words", "highlight_links" };
+    const char *names[] = { "navigate", "stats", "annotations",     "bookmarks",
+                            "kosync",   "words", "highlight_links", "wifi_switch" };
     static_assert(sizeof(names) == sizeof(features::keys), "A feature without a name");
     QStringList hidden;
+    // The Wi-Fi switch exists only where the host controls the radio.
     for (int i = 0; i < int(sizeof(names) / sizeof(*names)); ++i)
-        if (featurePreferences.value(features::keys[i]).toBool(false))
+        if ((i != features::WifiSwitch || airplaneModeOption)
+            && featurePreferences.value(features::keys[i]).toBool(false))
             hidden.append(strings::get((QString("features.") + names[i]).toUtf8().constData()));
     disabledFeaturesButton->setCaption(
             hidden.isEmpty() ? strings::get("settings.hidden_features_none") : hidden.join(", "));
@@ -2759,17 +2761,19 @@ void SettingsPanel::showDisabledFeatures()
     card->heading(strings::get("settings.disable_features"),
                   strings::get("settings.disable_features_description"));
     auto draft = std::make_shared<QJsonObject>(featurePreferences);
-    const char *names[] = { "navigate", "stats", "annotations",    "bookmarks",
-                            "kosync",   "words", "highlight_links" };
+    const char *names[] = { "navigate", "stats", "annotations",     "bookmarks",
+                            "kosync",   "words", "highlight_links", "wifi_switch" };
     const ui::ControlIcon icons[] = { ui::ControlIcon::Compass,  ui::ControlIcon::Graph,
                                       ui::ControlIcon::Annotate, ui::ControlIcon::Bookmark,
                                       ui::ControlIcon::Sync,     ui::ControlIcon::Note,
-                                      ui::ControlIcon::Link };
+                                      ui::ControlIcon::Link,     ui::ControlIcon::System };
     static_assert(sizeof(icons) / sizeof(*icons) == sizeof(names) / sizeof(*names),
                   "A feature without an icon");
     QVector<ui::DescribedOption *> options;
     for (int i = 0; i < int(sizeof(names) / sizeof(*names)); ++i) {
         const auto *key = features::keys[i];
+        if (i == features::WifiSwitch && !airplaneModeOption)
+            continue;
         const auto prefix = QString("features.") + names[i];
         auto *option = checklistOption(card, QString("rrDisableFeature_%1").arg(key),
                                        strings::get(prefix.toUtf8().constData()),

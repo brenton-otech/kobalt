@@ -12,6 +12,7 @@
 #include "platform/api/safe_area.h"
 #include "ui/style/fonts.h"
 #include "support/strings.h"
+#include "reading/features.h"
 #include <QCloseEvent>
 #include <QDir>
 #include <QFileInfo>
@@ -179,6 +180,22 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
                                              account.password);
     };
     libraryView->editorKeyboard = readerServices(device).keyboard;
+    // The header switch is the stock airplane mode, as in the reader's System settings.
+    libraryView->setWifiEnabled = [device = device](bool enabled) {
+        device->setWirelessEnabled(enabled);
+    };
+    const auto showWifi = [this] {
+        // Settings can hide the switch; the reader's preferences are read when a book closes.
+        if (!features::enabled(controller.preferences(), features::WifiSwitch)) {
+            start->library()->hideWifi();
+            return;
+        }
+        const auto &wifi = device->state().wifi;
+        start->library()->setWifi(wifi.enabled, wifi.connected, wifi.strength);
+    };
+    connect(device.get(), &Device::wifiChanged, this, showWifi);
+    connect(&controller, &standalone::ReaderController::closed, this, showWifi);
+    showWifi();
     libraryView->openCatalog = [this, editCatalogAccount] {
         // Without an account the catalog starts at its account screen.
         if (!catalog->account().url.isValid()) {

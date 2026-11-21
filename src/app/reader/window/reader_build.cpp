@@ -485,6 +485,8 @@ void Reader::start()
     if (services.observeWifi)
         services.observeWifi(this, [this](WifiStatus state) {
             wifiRadioEnabled = state.enabled;
+            menuWifiSwitch->setAccessibleName(
+                    strings::get(state.enabled ? "library.wifi_turn_off" : "library.wifi_turn_on"));
             if (airplaneModeOption)
                 airplaneModeOption->setChecked(!state.enabled);
             if (menuWifi->setStatus(state.enabled, state.connected, state.strength)
@@ -778,6 +780,16 @@ void Reader::buildToolbar()
     menuWifi = new kobalt::ui::WifiIndicator(topControls);
     menuWifi->setObjectName("rrMenuWifi");
     toolbarComposition.wifi = menuWifi;
+    // Tapping the mark switches the radio where the host controls it.
+    menuWifiSwitch = new kobalt::ui::TapArea(topControls);
+    menuWifiSwitch->setObjectName("rrMenuWifiSwitch");
+    menuWifiSwitch->setEnabled(false);
+    menuWifiSwitch->hide();
+    connect(menuWifiSwitch, &QAbstractButton::clicked, this, [this] {
+        if (services.setWifiEnabled)
+            services.setWifiEnabled(!wifiRadioEnabled);
+    });
+    toolbarComposition.wifiSwitch = menuWifiSwitch;
     auto *top = new QHBoxLayout;
     toolbar->addLayout(top);
     top->setSpacing(metrics::panel::toolbarGap);

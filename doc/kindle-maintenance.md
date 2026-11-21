@@ -125,6 +125,37 @@ If the supervisor is killed, resume the PIDs in
 the recovery directory only after confirming those processes. A restart of the
 Kindle also recovers.
 
+## Wi-Fi switch
+
+The Library header has a Wi-Fi cell left of Search, and the Wi-Fi mark in the
+reading menu's status line is a switch with a finger-sized target. Both show
+the struck-through mark while the radio is off, the empty signal while it is on
+but not connected, and the signal strength once connected. A tap asks for the
+opposite state through the stock airplane mode property, the same control as
+Airplane mode in Settings > System, and the mark follows the reported state.
+**Hide unneeded features** lists the switch as Wi-Fi switch
+(`disable_wifi_switch`); hiding it removes both switches and leaves Airplane
+mode. The Library reads that setting at start and when a book closes. The
+switch has headless captures of the Library header only; its behaviour on a
+physical Kindle and the reading-menu target need a device check.
+
+## KOSync and Wi-Fi
+
+While the user has the radio off, with the Wi-Fi switch or Airplane mode, KOSync
+makes no request and never turns Wi-Fi on: the opening, wake, reading, sleep and
+close syncs are skipped, and Sync now reports that Wi-Fi is off. Positions stay
+saved locally and syncing resumes on its schedule once Wi-Fi is on. This rule
+applies only where the host offers a Wi-Fi switch.
+
+Automatic sync has **Check in the background** below **When you open a book**
+(`sync_on_open_quietly`). With it the book opens at once and the opening check
+runs like a periodic sync, without the Syncing notice. Pages turned during the
+check are handled as in any sync while reading: the answer is compared with the
+position at that moment, nothing is uploaded over a newer remote position until
+the user chooses, and the choice shows only on a settled page. Its buttons ignore
+taps for 800 ms, so a tap meant for a page turn cannot answer it. Neither
+behaviour has a native test yet, and both need a device check.
+
 ## Catalog
 
 The Library menu has a Catalog entry that browses an OPDS 1 catalog and downloads

@@ -99,6 +99,8 @@
 "kosync.when_heading" = "When Kobalt syncs your progress";
 "kosync.when_open" = "When you open a book";
 "kosync.when_open_description" = "Gets your latest progress. If another device is further along, Kobalt asks before moving.";
+"kosync.quiet_open" = "Check in the background";
+"kosync.quiet_open_description" = "Opens the book at once and checks while you read. Kobalt asks only if another device is further along.";
 "kosync.when_reading" = "While you read";
 "kosync.when_reading_description" = "Syncs your progress periodically.";
 "kosync.when_sleep_wake" = "When your device sleeps or wakes";
@@ -136,6 +138,7 @@
 "kosync.cancel_sync" = "Cancel sync";
 "kosync.opening_description" = "Kobalt is syncing your progress. Please wait...";
 "kosync.skipped" = "Sync skipped. Your position is saved locally.";
+"kosync.wifi_off" = "Wi-Fi is off. Turn it on to sync.";
 "kosync.saved_locally" = "Could not sync. Your position is saved locally.";
 "kosync.syncing" = "Syncing progress…";
 "kosync.up_to_date" = "Reading progress is up to date.";
@@ -192,6 +195,8 @@
 "library.search" = "Search library";
 "library.search_placeholder" = "Title, author or series";
 "library.close_search" = "Close search";
+"library.wifi_turn_on" = "Turn Wi-Fi on";
+"library.wifi_turn_off" = "Turn Wi-Fi off";
 "library.add_folder" = "Add folder";
 "library.use_folder" = "Use this folder";
 "library.parent_folder" = "Parent folder";
@@ -1939,6 +1944,8 @@
 "features.words_description" = "Hides the Words tab, the dictionary's save button and My Words in the Library. Lookups are no longer saved; saved words are kept.";
 "features.highlight_links" = "Highlight links";
 "features.highlight_links_description" = "Hides the Highlight links button and link count in the reading menu. Link taps and long presses still work.";
+"features.wifi_switch" = "Wi-Fi switch";
+"features.wifi_switch_description" = "Hides the Wi-Fi switch in the reading menu and the Library. Airplane mode in System settings still works.";
 "words.no_entry" = "No dictionary entry · Added by you";
 "words.no_entry_detail" = "The dictionary had no entry for this word. You added it to My Words yourself.";
 

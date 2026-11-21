@@ -814,6 +814,7 @@ Navigation::Navigation(QWidget *parent, const ToolbarComposition &controls)
       battery(controls.battery),
       bluetooth(controls.bluetooth),
       wifi(controls.wifi),
+      wifiSwitch(controls.wifiSwitch),
       formattingWarning(controls.formattingWarning),
       search(controls.search),
       sync(controls.sync)
@@ -1076,6 +1077,8 @@ void Navigation::placeZenToolbar(QSize size, const QVector<QWidget *> &actions,
         bluetooth->hide();
     if (wifi)
         wifi->hide();
+    if (wifiSwitch)
+        wifiSwitch->hide();
     // Only the group paints. The page shows beside it.
     const auto shape = roundedMask(QRect(left - int(chrome::zenRule), 0,
                                          groupWidth + 2 * int(chrome::zenRule), toolbarHeight()),
@@ -1167,9 +1170,20 @@ void Navigation::placeToolbar(QSize size, const QVector<QWidget *> &actions, boo
         }
     }
     if (wifi) {
-        wifi->setVisible(statusVisible && wifi->active());
-        if (wifi->active())
+        // As a switch the mark stays in view while the radio is off, so it can turn it on.
+        const bool switchable = wifiSwitch && wifiSwitch->isEnabled();
+        const bool shown = statusVisible && (wifi->active() || switchable);
+        wifi->setVisible(shown);
+        if (wifi->active() || switchable)
             placeStatus(wifi);
+        if (wifiSwitch) {
+            wifiSwitch->setVisible(shown && switchable);
+            // A finger-sized target around the small mark.
+            const int reach = chrome::cellWidth;
+            wifiSwitch->setGeometry(wifi->x() + (wifi->width() - reach) / 2,
+                                    wifi->y() + (wifi->height() - reach) / 2, reach, reach);
+            wifiSwitch->raise();
+        }
     }
     updateSessionGeometry();
     int actionRight = size.width();
@@ -1332,7 +1346,7 @@ void Navigation::updateSessionGeometry()
     int right = battery->x();
     if (bluetooth && bluetooth->active())
         right = qMin(right, bluetooth->x());
-    if (wifi && wifi->active())
+    if (wifi && !wifi->isHidden())
         right = qMin(right, wifi->x());
     right = qMax(0, right - int(chrome::inset));
     const int left = qMin(right, clock->geometry().right() + 1 + int(chrome::inset));
