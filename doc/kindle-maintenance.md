@@ -213,7 +213,15 @@ the install it starts the new build itself only when the new
 `launcher/supervisor.sh` is identical to its own copy. Otherwise it restores
 the stock UI and starts the new build through `launcher/launch.sh`, so a
 supervisor change takes effect at once and the stock screen shows briefly. A
-failed install starts the build that is still installed. An install that
+failed install starts the build that is still installed.
+
+The stock BusyBox, KPM and LIPC tools link `libstdc++` and `libgcc_s`, which the
+app folder also bundles. The supervisor drops app-folder entries from an
+inherited `LD_LIBRARY_PATH` and starts its shell again, so no stock command maps
+a library that KPM rewrites in place; only the reader gets the app's `lib`. A
+supervisor started by the update helper of revision 11 or older inherited the
+reader's path, and its next in-place update ended in bus errors with the run
+folder left behind. Close and reopen such a Kobalt once before updating it. An install that
 leaves no startable app returns to the stock UI. KPM has fifteen minutes; a
 stalled download is then stopped. `logs/launcher.log` records each step.
 

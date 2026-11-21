@@ -3,6 +3,35 @@
 set -u
 APP_DIR=$1
 RUN_DIR=$2
+# The stock BusyBox, KPM and LIPC tools link libstdc++ and libgcc_s. A
+# supervisor started from the reader's environment, as the update helper of
+# earlier builds did, would map the reader's copies from the app folder, and
+# KPM rewrites those in place: every later stock command then fails with a bus
+# error. Drop app entries from the library path and start this shell again, so
+# neither it nor any stock command it runs maps a library from the app folder.
+if [ -n "${LD_LIBRARY_PATH+set}" ]; then
+    stock_library_path=
+    saved_ifs=$IFS
+    IFS=:
+    set -f
+    for entry in $LD_LIBRARY_PATH; do
+        case "$entry" in
+            '' | "$APP_DIR" | "$APP_DIR"/*) ;;
+            *) stock_library_path=${stock_library_path:+$stock_library_path:}$entry ;;
+        esac
+    done
+    set +f
+    IFS=$saved_ifs
+    if [ "$stock_library_path" != "$LD_LIBRARY_PATH" ]; then
+        if [ -n "$stock_library_path" ]; then
+            LD_LIBRARY_PATH=$stock_library_path
+            export LD_LIBRARY_PATH
+        else
+            unset LD_LIBRARY_PATH
+        fi
+        exec sh "$0" "$@"
+    fi
+fi
 # The stock UI keeps running but frozen while Kobalt runs, as KOReader does by
 # default: pillow is disabled and the window manager is stopped with STOP.
 shift 2

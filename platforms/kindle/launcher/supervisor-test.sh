@@ -36,6 +36,7 @@ if sh "$storage_check" /mnt/us/kobalt "$TEST_DIR/mounts"; then
 fi
 cat >"$TEST_DIR/tools/status" <<'EOF'
 #!/bin/sh
+printf '%s\n' "${LD_LIBRARY_PATH-unset}" >"$KINDLE_TEST_ROOT/stock-library-path"
 if [ "$1" = volumd ]; then echo "volumd start/running, process $KINDLE_TEST_VOLUME_PID"; exit 0; fi
 if [ "${KINDLE_TEST_GUI_STOPPED:-0}" = 1 ]; then echo 'lab126_gui stop/waiting'; exit 0; fi
 echo 'lab126_gui start/running, process 123'
@@ -437,4 +438,12 @@ write_update_app
 KOBALT_KPM="$TEST_DIR/no-kpm" run_case
 [ "$result" = 0 ] && [ ! -e "$TEST_DIR/run" ]
 [ "$(cat "$TEST_DIR/actions")" = "$(printf 'app\napp')" ]
+
+# A supervisor started from the reader's environment runs stock commands
+# without the app's libraries, and the reader still gets them first.
+LD_LIBRARY_PATH="$TEST_DIR/app/lib:/stock/lib:$TEST_DIR/app/lib/qt" run_case
+[ "$result" = 0 ] && [ ! -e "$TEST_DIR/run" ]
+[ "$(cat "$TEST_DIR/stock-library-path")" = /stock/lib ]
+LD_LIBRARY_PATH="$TEST_DIR/app/lib" run_case
+[ "$result" = 0 ] && [ "$(cat "$TEST_DIR/stock-library-path")" = unset ]
 echo 'Kindle supervisor checks passed.'
