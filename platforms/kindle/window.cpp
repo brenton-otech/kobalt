@@ -11,6 +11,7 @@
 #include "platform/api/kobo_refresh.h"
 #include "platform/api/safe_area.h"
 #include "ui/style/fonts.h"
+#include "support/strings.h"
 #include <QCloseEvent>
 #include <QDir>
 #include <QFileInfo>
@@ -154,11 +155,89 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
                 start->library()->setFolderPickerLocation(location);
             });
     connect(folderBrowser, &FolderBrowser::selected, this, [this](const QString &path) {
-        if (!closing)
+        if (closing)
+            return;
+        if (std::exchange(catalogFolderPending, false))
+            catalog->setFolder(path);
+        else
             store.addFolder({ path, path.section('/', -1) });
     });
+    connect(folderBrowser, &FolderBrowser::failed, this, [this] { catalogFolderPending = false; });
     connect(folderBrowser, &FolderBrowser::failed, start,
             &standalone::StartScreen::showLibraryError);
+    catalog = new opds::Browser(
+            QFileInfo(paths.directory).dir().filePath(QStringLiteral("opds.json")), &catalogNetwork,
+            this);
+    const auto chooseCatalogFolder = [this, folderStorageRoot] {
+        const auto current = catalog->folder();
+        start->library()->showFolderPicker(QFileInfo(current).isDir() ? current : folderStorageRoot,
+                                           false, true);
+    };
+    const auto editCatalogAccount = [this] {
+        const auto &account = catalog->account();
+        start->library()->showCatalogAccount(account.url.toString(), account.username,
+                                             account.password);
+    };
+    libraryView->editorKeyboard = readerServices(device).keyboard;
+    libraryView->openCatalog = [this, editCatalogAccount] {
+        // Without an account the catalog starts at its account screen.
+        if (!catalog->account().url.isValid()) {
+            editCatalogAccount();
+            return;
+        }
+        start->library()->showCatalog();
+        catalog->open();
+    };
+    libraryView->catalogEditAccount = editCatalogAccount;
+    libraryView->catalogAccountSaved = [this](const QString &address, const QString &username,
+                                              const QString &password) {
+        const auto url = opds::catalogUrl(address);
+        if (!url.isValid()) {
+            start->library()->showNotice(strings::get("catalog.account"),
+                                         strings::get("catalog.invalid_address"));
+            return;
+        }
+        catalog->setAccount(url, username, password);
+        start->library()->closeCatalogAccount();
+        start->library()->showCatalog();
+        catalog->open();
+    };
+    libraryView->catalogSelect = [this](int index) { catalog->select(index); };
+    libraryView->catalogMore = [this] { catalog->more(); };
+    libraryView->catalogBack = [this] {
+        if (catalog->back())
+            return;
+        catalog->close();
+        start->library()->closeCatalog();
+    };
+    libraryView->catalogChooseFolder = chooseCatalogFolder;
+    libraryView->chooseDownloadFolder = [this](const QString &path) {
+        catalogFolderPending = true;
+        folderBrowser->select(path);
+    };
+    connect(catalog, &opds::Browser::loading, this,
+            [this] { start->library()->setCatalogLoading(); });
+    connect(catalog, &opds::Browser::listed, this,
+            [this](const opds::Listing &listing, bool appended) {
+                start->library()->setCatalogListing(listing, appended);
+            });
+    connect(catalog, &opds::Browser::itemChanged, this, [this](int index, const QString &detail) {
+        start->library()->setCatalogItemDetail(index, detail);
+    });
+    connect(catalog, &opds::Browser::folderNeeded, this, chooseCatalogFolder);
+    connect(catalog, &opds::Browser::downloaded, this, [this](const QString &path) {
+        if (closing)
+            return;
+        // A download folder outside the Library becomes a Library folder, so the book appears.
+        const auto folder = QFileInfo(path).absolutePath();
+        bool known = false;
+        for (const auto &entry : store.index().folders)
+            known = known || folder == entry.key || folder.startsWith(entry.key + QLatin1Char('/'));
+        if (known)
+            store.scan();
+        else
+            store.addFolder({ folder, folder.section('/', -1) });
+    });
     connect(start, &standalone::StartScreen::addFolderRequested, this,
             [this, folderStorageRoot] { start->library()->showFolderPicker(folderStorageRoot); });
     connect(start, &standalone::StartScreen::libraryOpenRequested, this,
@@ -303,6 +382,8 @@ void Window::sleepingChanged(bool sleeping)
     if (sleeping) {
         if (libraryKeyboard)
             libraryKeyboard->hide();
+        // The account editor owns its keyboard and closes with it.
+        start->library()->closeCatalogAccount();
         if (auto *reader = controller.window()) {
             reader->sleepReader();
             reader->sleepViewReady();

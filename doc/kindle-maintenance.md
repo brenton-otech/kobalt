@@ -125,6 +125,43 @@ If the supervisor is killed, resume the PIDs in
 the recovery directory only after confirming those processes. A restart of the
 Kindle also recovers.
 
+## Catalog
+
+The Library menu has a Catalog entry that browses an OPDS 1 catalog and downloads
+EPUBs, as KOReader does. Without an account it opens the Catalog account screen:
+Catalog address, Username and Password, each edited in the one-field dialog of
+the KOSync account with the on-screen keyboard. **Save and connect** saves the
+account and opens the catalog. The settings button in the catalog header opens
+the account again.
+
+The account is `opds.json` in the profile folder, beside `config/`
+(`/mnt/us/kobalt/data/opds.json` for a KPM installation), with `url`,
+`username`, `password` and `folder`. An address without a scheme means `https`.
+The username and password are optional and are sent as HTTP Basic credentials
+only to the scheme, host and port of the address, never to another server that
+a feed links to. The password is stored as plain text on the Kindle's user
+storage. One worker thread writes the file.
+
+The first row of the catalog screen is the download folder. Tap it to choose a
+folder inside Kindle storage; Kobalt saves the choice as `folder` in `opds.json`
+and asks for it when a book is chosen first. A downloaded book is saved as
+`Author - Title.epub`, and a second copy gets ` (2)`. A download folder outside
+the Library folders becomes a Library folder, so the book appears. Sections
+open their feeds, Back returns to the previous feed, and **Load more** appends
+the feed's next page. Only EPUB acquisition links are offered. One book
+downloads at a time, in memory, up to 200 MB; the file write runs on a worker
+thread. A download keeps running when the catalog closes.
+
+The catalog code is shared: `src/opds/` has the feed parser, the HTTP client and
+the browser that the screen in `src/app/library/library_view.cpp` drives. Only
+the Kindle host connects it. `model.opds-feed` checks the parser, file names and
+the credential origin rule; `model.opds-browser` drives the browser against a
+local server with Basic credentials and checks that the saved account reads
+back. The capture tour saves the account screen, its address editor and the
+catalog with a sample feed. The account editor repeats the KOSync editor's
+code; sharing one editor between them is open work. These checks do not establish Wi-Fi, TLS or
+server compatibility on a physical Kindle.
+
 ## Validation
 
 With a prepared native Qt SDK, configure/build `kindle-native` from

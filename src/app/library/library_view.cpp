@@ -26,6 +26,9 @@
 #include <utility>
 #include <QApplication>
 #include <QCache>
+#include <QDynamicPropertyChangeEvent>
+#include <QHBoxLayout>
+#include <QHideEvent>
 #include <QFile>
 #include <QImageReader>
 #include <QLabel>
@@ -734,6 +737,16 @@ public:
                                                : "library.folder_picker_description"));
     }
 
+    // The catalog's download folder uses the folder rows with its own captions.
+    void setDownloadMode(bool value)
+    {
+        setProperty("downloadFolder", value);
+        if (!value)
+            return;
+        title->setText(strings::get("catalog.choose_folder"));
+        location->setDetail(strings::get("catalog.folder_description"));
+    }
+
     void loading(const QString &path)
     {
         busy = true;
@@ -857,6 +870,444 @@ private:
                 { 0, top + shown * rowHeight, width(),
                   qMax(0,
                        available - shown * rowHeight - (paged ? int(chrome::actionHeight) : 0)) });
+    }
+};
+
+// One feed of an OPDS catalog. Its header, rows and paging match the folder
+// picker; the host walks the catalog and downloads the books.
+class CatalogPage final : public ui::Panel
+{
+public:
+    explicit CatalogPage(QWidget *parent) : ui::Panel(parent)
+    {
+        setObjectName("libraryCatalog");
+        back = new ui::CellButton(ui::ControlIcon::Back, this, chrome::backIcon);
+        back->setObjectName("libraryCatalogBack");
+        back->setRule(Qt::RightEdge);
+        back->setAccessibleName(strings::get("library.back"));
+        title = new ui::InterfaceLabel(strings::get("catalog.title"), this);
+        title->setTextFormat(Qt::PlainText);
+        ui::readerStyle(title, ui::styles::brand(chrome::titleText) + "background:transparent;");
+        folder = new ui::ListRow(this);
+        folder->setObjectName("libraryCatalogFolder");
+        folder->setTitle(strings::get("catalog.folder"));
+        folder->setAccessory(ui::ListRow::Chevron{ });
+        account = new ui::CellButton(ui::ControlIcon::Settings, this);
+        account->setObjectName("libraryCatalogAccountButton");
+        account->setRule(Qt::LeftEdge);
+        account->setAccessibleName(strings::get("catalog.account"));
+        status = new ui::InterfaceLabel({ }, this);
+        status->setObjectName("libraryCatalogStatus");
+        status->setWordWrap(true);
+        status->setTextFormat(Qt::PlainText);
+        status->setAlignment(Qt::AlignCenter);
+        ui::readerStyle(status,
+                        ui::styles::font(chrome::descriptionText) + "background:transparent;");
+        pager = new ui::PagerBar(this, "libraryCatalog");
+        connect(pager->previous, &QPushButton::clicked, this, [this] {
+            page = pager->turnTarget(-1);
+            arrange();
+        });
+        connect(pager->next, &QPushButton::clicked, this, [this] {
+            page = pager->turnTarget(1);
+            arrange();
+        });
+        hide();
+    }
+
+    ui::CellButton *back, *account;
+    ui::ListRow *folder;
+    std::function<void(int)> select;
+    std::function<void()> more;
+
+    void loading()
+    {
+        busy = true;
+        refresh();
+    }
+
+    void present(const opds::Listing &value, bool keepPage)
+    {
+        busy = false;
+        data = value;
+        if (!keepPage)
+            page = 0;
+        refresh();
+    }
+
+    void setDetail(int index, const QString &text)
+    {
+        if (index < 0 || index >= data.items.size())
+            return;
+        data.items[index].detail = text;
+        arrange();
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *) override { arrange(); }
+
+    void paintEvent(QPaintEvent *event) override
+    {
+        ui::Panel::paintEvent(event);
+        QPainter painter(this);
+        painter.fillRect(0, chrome::actionHeight - chrome::heavyRule, width(), chrome::heavyRule,
+                         palette().color(QPalette::WindowText));
+    }
+
+private:
+    QLabel *title, *status;
+    ui::PagerBar *pager;
+    QVector<ui::ListRow *> rows;
+    opds::Listing data;
+    bool busy = false;
+    int page = 0;
+
+    void refresh()
+    {
+        setProperty("loading", busy);
+        title->setText(data.title.isEmpty() ? strings::get("catalog.title") : data.title);
+        folder->setDetail(data.folder.isEmpty() ? strings::get("catalog.folder_not_selected")
+                                                : data.folder);
+        status->setText(busy ? strings::get("catalog.loading")
+                                : !data.error.isEmpty() ? data.error
+                                                        : strings::get("catalog.empty"));
+        arrange();
+    }
+
+    void arrange()
+    {
+        const int bar = chrome::actionHeight - chrome::heavyRule;
+        back->setGeometry(0, 0, chrome::cellWidth, bar);
+        account->setGeometry(width() - chrome::cellWidth, 0, chrome::cellWidth, bar);
+        title->setGeometry(chrome::cellWidth + chrome::inset, 0,
+                           qMax(1, width() - 2 * chrome::cellWidth - 2 * chrome::inset), bar);
+        const int rowHeight = ui::metrics::list::twoLines;
+        folder->setGeometry(0, chrome::actionHeight, width(), rowHeight);
+        const int top = chrome::actionHeight + rowHeight;
+        // A further page of the feed is one more row at the end of the list.
+        const int total = int(data.items.size()) + (data.more ? 1 : 0);
+        const int available = qMax(1, height() - top);
+        const bool paged = total > qMax(1, available / rowHeight);
+        const int capacity =
+                qMax(1, (available - (paged ? int(chrome::actionHeight) : 0)) / rowHeight);
+        const int count = qMax(1, (total + capacity - 1) / capacity);
+        page = qBound(0, page, count - 1);
+        pager->setPage(page, count);
+        pager->setVisible(paged);
+        pager->setGeometry(0, height() - chrome::actionHeight, width(), chrome::actionHeight);
+        const bool listing = !busy && data.error.isEmpty();
+        const int shown = listing ? qMin(capacity, total - page * capacity) : 0;
+        while (rows.size() < shown) {
+            auto *row = new ui::ListRow(this);
+            row->setObjectName(QString("libraryCatalogRow%1").arg(rows.size()));
+            connect(row, &QPushButton::clicked, this, [this, row] {
+                const int index = row->property("catalogIndex").toInt();
+                if (index >= data.items.size()) {
+                    if (more)
+                        more();
+                } else if (select)
+                    select(index);
+            });
+            rows.append(row);
+        }
+        for (int i = 0; i < rows.size(); ++i) {
+            rows[i]->setVisible(i < shown);
+            if (i >= shown)
+                continue;
+            const int index = page * capacity + i;
+            const bool further = index >= data.items.size();
+            rows[i]->setProperty("catalogIndex", index);
+            rows[i]->setTitle(further ? strings::get("catalog.load_more")
+                                      : data.items[index].title);
+            rows[i]->setDetail(further ? QString() : data.items[index].detail);
+            rows[i]->setAccessory(further || data.items[index].book
+                                          ? ui::ListRow::Accessory(ui::ListRow::None{ })
+                                          : ui::ListRow::Accessory(ui::ListRow::Chevron{ }));
+            rows[i]->setGeometry(0, top + i * rowHeight, width(), rowHeight);
+        }
+        status->setVisible(!listing || total == 0);
+        status->setGeometry(chrome::inset, top, qMax(1, width() - 2 * chrome::inset),
+                            qMax(1, available - (paged ? int(chrome::actionHeight) : 0)));
+        pager->setBlankArea(
+                { 0, top + shown * rowHeight, width(),
+                  qMax(0,
+                       available - shown * rowHeight - (paged ? int(chrome::actionHeight) : 0)) });
+    }
+};
+
+// The account of the OPDS catalog. Its fields are rows that open the same
+// one-field dialog as the KOSync account, with the on-screen keyboard.
+class CatalogAccountPage final : public ui::Panel
+{
+public:
+    CatalogAccountPage(QWidget *parent, KeyboardFactory keyboard)
+        : ui::Panel(parent), makeKeyboard(std::move(keyboard))
+    {
+        setObjectName("libraryCatalogAccount");
+        back = new ui::CellButton(ui::ControlIcon::Back, this, chrome::backIcon);
+        back->setObjectName("libraryCatalogAccountBack");
+        back->setRule(Qt::RightEdge);
+        back->setAccessibleName(strings::get("library.back"));
+        title = new ui::InterfaceLabel(strings::get("catalog.account"), this);
+        title->setTextFormat(Qt::PlainText);
+        ui::readerStyle(title, ui::styles::brand(chrome::titleText) + "background:transparent;");
+        body = new QWidget(this);
+        auto *rows = new QVBoxLayout(body);
+        rows->setContentsMargins(0, 0, 0, 0);
+        rows->setSpacing(0);
+        auto *description =
+                new ui::InterfaceLabel(strings::get("catalog.account_description"), body);
+        description->setObjectName("libraryCatalogAccountDescription");
+        description->setTextFormat(Qt::PlainText);
+        description->setWordWrap(true);
+        ui::readerStyle(
+                description,
+                QString("QLabel{background:palette(midlight);border-bottom:1px solid palette(light);padding:%1px %2px;")
+                                .arg(int(ui::metrics::spacing::row))
+                                .arg(int(chrome::inset))
+                        + ui::styles::font(chrome::descriptionText) + "}");
+        rows->addWidget(description);
+        fields[0] = ui::makeCaptionButton(body, rows, "libraryCatalogAddress",
+                                          strings::get("catalog.address"), [this] { edit(0); });
+        fields[1] = ui::makeCaptionButton(body, rows, "libraryCatalogUsername",
+                                          strings::get("kosync.username"), [this] { edit(1); });
+        fields[2] = ui::makeCaptionButton(body, rows, "libraryCatalogPassword",
+                                          strings::get("kosync.password"), [this] { edit(2); });
+        // The rows match the account fields of the KOSync settings page.
+        const auto rowStyle =
+                QString("QPushButton{font-size:%1px;border:0;border-radius:0;text-align:left;padding:0 %2px;"
+                        "background:palette(window);color:palette(window-text);min-height:%3px;max-height:%3px;} QPushButton:pressed{background:palette(midlight);}")
+                        .arg(int(chrome::labelText))
+                        .arg(int(chrome::inset))
+                        .arg(int(chrome::actionHeight));
+        for (auto *field : fields) {
+            ui::readerStyle(field, rowStyle);
+            field->setRule(Qt::BottomEdge);
+            field->setIconVisible(false);
+            field->setChevron(true);
+            field->setValueCaption(true);
+            field->setFixedHeight(chrome::actionHeight);
+        }
+        auto *actions = new QWidget(body);
+        auto *actionRows = new QVBoxLayout(actions);
+        actionRows->setContentsMargins(chrome::inset, ui::metrics::spacing::gutter, chrome::inset,
+                                       ui::metrics::spacing::gutter);
+        connectButton = actionButton(actions, strings::get("catalog.connect"),
+                                     "libraryCatalogConnect", true);
+        actionRows->addWidget(connectButton);
+        rows->addWidget(actions);
+        rows->addStretch(1);
+        updateCaptions();
+        hide();
+    }
+
+    ~CatalogAccountPage() override { dismissEditor(); }
+
+    ui::CellButton *back;
+    QPushButton *connectButton;
+    QString values[3];
+    QPointer<ui::ModalOverlay> editorDialog;
+
+    void setAccount(const QString &address, const QString &username, const QString &password)
+    {
+        values[0] = address;
+        values[1] = username;
+        values[2] = password;
+        updateCaptions();
+    }
+
+    void dismissEditor()
+    {
+        if (!editorDialog)
+            return;
+        if (window())
+            window()->removeEventFilter(this);
+        keyboard->hide();
+        keyboard->submitted = { };
+        editorDialog->hide();
+        keyboard.reset();
+        editorDialog->deleteLater();
+        editorDialog = nullptr;
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *) override { arrange(); }
+
+    void hideEvent(QHideEvent *event) override
+    {
+        dismissEditor();
+        ui::Panel::hideEvent(event);
+    }
+
+    void paintEvent(QPaintEvent *event) override
+    {
+        ui::Panel::paintEvent(event);
+        QPainter painter(this);
+        painter.fillRect(0, chrome::actionHeight - chrome::heavyRule, width(), chrome::heavyRule,
+                         palette().color(QPalette::WindowText));
+    }
+
+    bool eventFilter(QObject *object, QEvent *event) override
+    {
+        if (object == editorDialog && event->type() == QEvent::Resize && keyboard) {
+            keyboard->place();
+            editorDialog->fitCard();
+            placeEditor();
+        }
+        if (event->type() == QEvent::DynamicPropertyChange
+            && static_cast<QDynamicPropertyChangeEvent *>(event)->propertyName()
+                    == "reader_keyboard_bounds")
+            placeEditor();
+        return ui::Panel::eventFilter(object, event);
+    }
+
+private:
+    KeyboardFactory makeKeyboard;
+    std::unique_ptr<KeyboardController> keyboard;
+    QLabel *title;
+    QWidget *body;
+    ui::CaptionButton *fields[3];
+    bool submitting = false;
+
+    void arrange()
+    {
+        const int bar = chrome::actionHeight - chrome::heavyRule;
+        back->setGeometry(0, 0, chrome::cellWidth, bar);
+        title->setGeometry(chrome::cellWidth + chrome::inset, 0,
+                           qMax(1, width() - chrome::cellWidth - 2 * chrome::inset), bar);
+        body->setGeometry(0, chrome::actionHeight, width(),
+                          qMax(1, height() - int(chrome::actionHeight)));
+    }
+
+    void updateCaptions()
+    {
+        const auto empty = strings::get("kosync.not_set");
+        fields[0]->setCaption(values[0].isEmpty() ? empty : values[0]);
+        fields[1]->setCaption(values[1].isEmpty() ? empty : values[1]);
+        fields[2]->setCaption(values[2].isEmpty() ? empty : QStringLiteral("••••••••"));
+    }
+
+    // The card sits in the space above the keyboard.
+    void placeEditor()
+    {
+        if (!editorDialog)
+            return;
+        const auto bounds = window()->property("reader_keyboard_bounds").toRect();
+        int bottom = editorDialog->height() / 2;
+        if (!bounds.isEmpty())
+            bottom = editorDialog->mapFrom(window(), bounds.topLeft()).y();
+        editorDialog->setCardArea(QRect(0, 0, editorDialog->width(), qMax(1, bottom)));
+    }
+
+    void edit(int field)
+    {
+        if (editorDialog || !makeKeyboard)
+            return;
+        submitting = false;
+        const auto titleText = strings::get(field == 0           ? "catalog.address"
+                                                    : field == 1 ? "kosync.username"
+                                                                 : "kosync.password");
+        auto *host = parentWidget();
+        auto *dialog =
+                new ui::ChoiceModal(host, { { }, titleText, { } },
+                                    { strings::get("common.cancel"), "libraryCatalogEditCancel" },
+                                    { strings::get("common.ok"), "libraryCatalogEditSave" });
+        editorDialog = dialog;
+        editorDialog->setObjectName("libraryCatalogEditor");
+        editorDialog->setDimmed(true);
+        editorDialog->setGeometry(host->rect());
+        auto *card = editorDialog->card();
+        auto *editor = new QLineEdit(card);
+        ui::prepareNativeEditor(editor);
+        editor->setObjectName("libraryCatalogInput");
+        editorDialog->setFocusProxy(editor);
+        editor->setMaxLength(field == 0 ? 2048 : 256);
+        editor->setText(values[field]);
+        // Use HTTPS as the default when the address has not been set.
+        if (field == 0 && values[0].isEmpty())
+            editor->setText(QStringLiteral("https://"));
+        editor->setAccessibleName(titleText);
+        editor->setInputMethodHints(Qt::ImhNoPredictiveText | Qt::ImhNoAutoUppercase
+                                    | (field == 2 ? Qt::ImhSensitiveData : Qt::ImhNone));
+        if (field == 2)
+            editor->setEchoMode(QLineEdit::Password);
+        ui::readerStyle(
+                editor,
+                QString("QLineEdit{border:%1px solid palette(mid);border-radius:0;padding:0;background:palette(window);color:palette(window-text);")
+                                .arg(int(ui::metrics::control::border))
+                        + ui::styles::font(chrome::labelText) + "}");
+        editor->setTextMargins(ui::metrics::notice::cardMargins.left(), 0,
+                               ui::metrics::notice::cardMargins.right(), 0);
+        editor->setMinimumHeight(chrome::actionHeight);
+        auto *row = new QWidget(card);
+        row->setObjectName("libraryCatalogInputRow");
+        auto *layout = new QHBoxLayout(row);
+        layout->setContentsMargins(
+                ui::metrics::notice::cardMargins.left(), ui::metrics::notice::cardMargins.top(),
+                ui::metrics::notice::cardMargins.right(), ui::metrics::notice::cardGap);
+        layout->setSpacing(ui::metrics::notice::cardGap);
+        layout->addWidget(editor, 1);
+        if (field == 2) {
+            auto *reveal = ui::makeButton(row, layout, "libraryCatalogPasswordReveal",
+                                          strings::get("kosync.show_password"), [] { });
+            reveal->setCheckable(true);
+            ui::readerStyle(reveal,
+                            ui::styles::outlined() + "QPushButton{"
+                                    + ui::styles::font(chrome::labelText) + "}");
+            reveal->ensurePolished();
+            const int showWidth = reveal->sizeHint().width();
+            reveal->setText(strings::get("kosync.hide_password"));
+            reveal->setFixedWidth(qMax(showWidth, reveal->sizeHint().width()));
+            reveal->setText(strings::get("kosync.show_password"));
+            reveal->setAccessibleName(strings::get("kosync.show_password_accessible"));
+            connect(reveal, &QPushButton::toggled, editor, [editor, reveal](bool visible) {
+                editor->setEchoMode(visible ? QLineEdit::Normal : QLineEdit::Password);
+                reveal->setText(
+                        strings::get(visible ? "kosync.hide_password" : "kosync.show_password"));
+                reveal->setAccessibleName(
+                        strings::get(visible ? "kosync.hide_password_accessible"
+                                             : "kosync.show_password_accessible"));
+            });
+        }
+        card->rows()->insertWidget(1, row);
+        const QPointer<CatalogAccountPage> owner(this);
+        const QPointer<ui::ModalOverlay> editing(dialog);
+        const auto dismiss = [owner, editing] {
+            if (owner && editing && owner->editorDialog == editing)
+                owner->dismissEditor();
+        };
+        const auto submit = [this, owner, editing, dismiss, field, editor] {
+            if (!owner || !editing || editorDialog != editing || submitting)
+                return;
+            submitting = true;
+            auto text = editor->text();
+            // The prefilled scheme alone is not an address.
+            if (field == 0
+                && (text.trimmed() == QLatin1String("https://")
+                    || text.trimmed() == QLatin1String("http://")))
+                text.clear();
+            values[field] = field == 2 ? text : text.trimmed();
+            updateCaptions();
+            // Native submission runs inside the controller. Destroy it only
+            // after its callback and any duplicate Return signal have returned.
+            editing->hide();
+            QTimer::singleShot(0, owner.data(), dismiss);
+        };
+        connect(dialog->secondaryButton(), &QPushButton::clicked, this, dismiss);
+        connect(dialog->primaryButton(), &QPushButton::clicked, this, submit);
+        connect(editor, &QLineEdit::returnPressed, this, submit);
+        editorDialog->dismissed = dismiss;
+        keyboard = makeKeyboard(editorDialog, editor);
+        keyboard->setSubmitText(strings::get("common.ok"));
+        keyboard->submitted = submit;
+        editorDialog->installEventFilter(this);
+        window()->installEventFilter(this);
+        editorDialog->show();
+        editorDialog->raise();
+        editorDialog->fitCard();
+        editor->setFocus();
+        keyboard->show();
+        placeEditor();
     }
 };
 
@@ -1166,6 +1617,7 @@ LibraryView::~LibraryView()
 
 void LibraryView::setKeyboardFactory(KeyboardFactory factory)
 {
+    editorKeyboard = factory;
     keyboard = factory ? factory(this, query) : nullptr;
     if (!keyboard)
         return;
@@ -1311,9 +1763,10 @@ void LibraryView::pageButton(int direction)
         return;
     }
     ui::turnVisiblePageControl(
-            folderPicker && folderPicker->isVisible()       ? static_cast<QWidget *>(folderPicker)
-                    : folderPage && folderPage->isVisible() ? static_cast<QWidget *>(folderPage)
-                                                            : this,
+            folderPicker && folderPicker->isVisible()         ? static_cast<QWidget *>(folderPicker)
+                    : catalogPage && catalogPage->isVisible() ? static_cast<QWidget *>(catalogPage)
+                    : folderPage && folderPage->isVisible()   ? static_cast<QWidget *>(folderPage)
+                                                              : this,
             direction);
 }
 
@@ -1325,6 +1778,20 @@ bool LibraryView::dismiss()
     }
     if (folderPicker && folderPicker->isVisible()) {
         closeFolderPicker();
+        return true;
+    }
+    if (catalogAccount && catalogAccount->isVisible()) {
+        if (catalogAccount->editorDialog)
+            catalogAccount->dismissEditor();
+        else
+            catalogAccount->hide();
+        return true;
+    }
+    if (catalogPage && catalogPage->isVisible()) {
+        if (catalogBack)
+            catalogBack();
+        else
+            closeCatalog();
         return true;
     }
     if (about && about->isVisible()) {
@@ -1506,6 +1973,10 @@ void LibraryView::arrange()
         folderPage->setGeometry(rect());
     if (folderPicker)
         folderPicker->setGeometry(rect());
+    if (catalogPage)
+        catalogPage->setGeometry(rect());
+    if (catalogAccount)
+        catalogAccount->setGeometry(rect());
     if (about)
         about->setGeometry(rect());
     if (overlay)
@@ -1697,6 +2168,10 @@ void LibraryView::showMoreSheet()
                     strings::get("library.folders"), "libraryMoreFolders", ui::ControlIcon::Folders,
                     [this] { showFolders(); }, true),
         };
+        if (openCatalog)
+            items.append(ui::actionItem(
+                    strings::get("catalog.title"), "libraryMoreCatalog", ui::ControlIcon::Download,
+                    [this] { QTimer::singleShot(0, this, openCatalog); }, true));
         if (words)
             items.append(ui::actionItem(
                     strings::get("library.my_words"), "libraryMoreWords", ui::ControlIcon::Note,
@@ -1913,7 +2388,7 @@ QString LibraryView::bookFor(const SavedWord &word) const
     return {};
 }
 
-void LibraryView::showFolderPicker(const QString &path, bool books)
+void LibraryView::showFolderPicker(const QString &path, bool books, bool download)
 {
     closeOverlay();
     if (!folderPicker) {
@@ -1930,12 +2405,17 @@ void LibraryView::showFolderPicker(const QString &path, bool books)
         };
         connect(folderPicker->use, &QPushButton::clicked, this, [this] {
             const auto path = folderPicker->data.path;
+            const bool download = folderPicker->property("downloadFolder").toBool();
             closeFolderPicker();
-            if (chooseFolder)
+            if (download) {
+                if (chooseDownloadFolder)
+                    chooseDownloadFolder(path);
+            } else if (chooseFolder)
                 chooseFolder(path);
         });
     }
     folderPicker->setBookMode(books);
+    folderPicker->setDownloadMode(download && !books);
     folderPicker->setGeometry(rect());
     folderPicker->loading(path);
     setDark(dark);
@@ -1963,5 +2443,94 @@ void LibraryView::closeFolderPicker()
 {
     if (folderPicker)
         folderPicker->hide();
+}
+
+void LibraryView::showCatalog()
+{
+    closeOverlay();
+    if (!catalogPage) {
+        catalogPage = new CatalogPage(this);
+        connect(catalogPage->back, &QPushButton::clicked, this, [this] {
+            if (catalogBack)
+                catalogBack();
+            else
+                closeCatalog();
+        });
+        connect(catalogPage->account, &QPushButton::clicked, this, [this] {
+            if (catalogEditAccount)
+                catalogEditAccount();
+        });
+        connect(catalogPage->folder, &QPushButton::clicked, this, [this] {
+            if (catalogChooseFolder)
+                catalogChooseFolder();
+        });
+        catalogPage->select = [this](int index) {
+            if (catalogSelect)
+                catalogSelect(index);
+        };
+        catalogPage->more = [this] {
+            if (catalogMore)
+                catalogMore();
+        };
+    }
+    catalogPage->setGeometry(rect());
+    catalogPage->present({ }, false);
+    catalogPage->loading();
+    setDark(dark);
+    catalogPage->show();
+    catalogPage->raise();
+}
+
+void LibraryView::setCatalogLoading()
+{
+    if (catalogPage && catalogPage->isVisible())
+        catalogPage->loading();
+}
+
+void LibraryView::setCatalogListing(const opds::Listing &listing, bool keepPage)
+{
+    if (!catalogPage || !catalogPage->isVisible())
+        return;
+    catalogPage->present(listing, keepPage);
+    // Rows added for the listing take the theme too.
+    setDark(dark);
+}
+
+void LibraryView::setCatalogItemDetail(int index, const QString &detail)
+{
+    if (catalogPage && catalogPage->isVisible())
+        catalogPage->setDetail(index, detail);
+}
+
+void LibraryView::closeCatalog()
+{
+    if (catalogPage)
+        catalogPage->hide();
+}
+
+void LibraryView::showCatalogAccount(const QString &address, const QString &username,
+                                     const QString &password)
+{
+    closeOverlay();
+    if (!catalogAccount) {
+        catalogAccount = new CatalogAccountPage(this, editorKeyboard);
+        connect(catalogAccount->back, &QPushButton::clicked, catalogAccount, &QWidget::hide);
+        connect(catalogAccount->connectButton, &QPushButton::clicked, this, [this] {
+            if (catalogAccountSaved)
+                catalogAccountSaved(catalogAccount->values[0], catalogAccount->values[1],
+                                    catalogAccount->values[2]);
+        });
+    }
+    catalogAccount->setAccount(address, username, password);
+    catalogAccount->setGeometry(rect());
+    setDark(dark);
+    catalogAccount->show();
+    catalogAccount->raise();
+}
+
+void LibraryView::closeCatalogAccount()
+{
+    if (catalogAccount)
+        catalogAccount->hide();
 }
 } // namespace kobalt::library

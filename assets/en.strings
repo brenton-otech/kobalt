@@ -203,6 +203,25 @@
 "library.no_subfolders" = "No subfolders. You can still use this folder.";
 "library.folder_picker_unavailable" = "This folder is unavailable or cannot be read. Choose another folder.";
 "library.folder_outside_storage" = "Choose a location inside Kindle storage.";
+
+/* catalog */
+"catalog.title" = "Catalog";
+"catalog.no_account" = "No catalog account yet. Tap the settings button to add one.";
+"catalog.account" = "Catalog account";
+"catalog.address" = "Catalog address";
+"catalog.account_description" = "Enter the address of an OPDS catalog, such as a Calibre-Web server. The username and password are optional.";
+"catalog.connect" = "Save and connect";
+"catalog.invalid_address" = "Enter a catalog address such as books.example.org/opds.";
+"catalog.no_epub" = "No EPUB available";
+"catalog.downloading" = "Downloading…";
+"catalog.downloaded" = "Downloaded";
+"catalog.loading" = "Loading catalog…";
+"catalog.empty" = "This section is empty.";
+"catalog.folder" = "Download folder";
+"catalog.folder_not_selected" = "Tap to choose where books are saved";
+"catalog.load_more" = "Load more";
+"catalog.choose_folder" = "Download folder";
+"catalog.folder_description" = "Downloaded books are saved in this folder.";
 "library.more" = "More";
 "library.exit_to_library" = "Library";
 "library.view_home" = "Home";

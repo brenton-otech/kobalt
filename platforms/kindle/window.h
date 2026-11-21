@@ -1,6 +1,8 @@
 #pragma once
 #include "platforms/standalone/reader.h"
 #include "library/library_store.h"
+#include "opds/browser.h"
+#include <QNetworkAccessManager>
 #include <QWidget>
 
 class QStackedWidget;
@@ -71,6 +73,10 @@ private:
     QStackedWidget *stack;
     standalone::StartScreen *start;
     FolderBrowser *folderBrowser;
+    // The OPDS catalog of the Library menu. Its account is opds.json in the profile.
+    QNetworkAccessManager catalogNetwork;
+    opds::Browser *catalog;
+    bool catalogFolderPending = false;
     standalone::WidgetCanvas *canvas;
     QLabel *sleepView, *retirementView;
     QTimer standby;

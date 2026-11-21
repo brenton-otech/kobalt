@@ -2,6 +2,7 @@
 #include "ui/controls/panels.h"
 #include "library/library_index.h"
 #include "platform/api/keyboard_controller.h"
+#include "opds/browser.h"
 #include <functional>
 #include <utility>
 
@@ -30,6 +31,8 @@ class BookPages;
 class FolderPage;
 class SortSheet;
 class FolderPicker;
+class CatalogPage;
+class CatalogAccountPage;
 
 struct FolderLocation
 {
@@ -69,7 +72,9 @@ public:
     // library itself is left.
     bool dismiss();
     void pageButton(int direction);
-    void showFolderPicker(const QString &path, bool books = false);
+    // With download set, the picker chooses the catalog download folder and
+    // reports it through chooseDownloadFolder.
+    void showFolderPicker(const QString &path, bool books = false, bool download = false);
 
     void showBookPicker(const QString &path) { showFolderPicker(path, true); }
 
@@ -77,6 +82,27 @@ public:
     void setFolderPickerLoading(const QString &path);
     void closeFolderPicker();
     std::function<void(const QString &path)> browseFolder, chooseFolder, chooseBook;
+    // The catalog of an OPDS server. The host owns the catalog browser and the
+    // downloads; a set openCatalog adds Catalog to the menu. The view reports
+    // the chosen row, the way back and the request for a further page.
+    void showCatalog();
+    void setCatalogLoading();
+    void setCatalogListing(const opds::Listing &listing, bool keepPage = false);
+    void setCatalogItemDetail(int index, const QString &detail);
+    void closeCatalog();
+    // The account screen: address, username and password, each edited with
+    // the on-screen keyboard. Saving reports the three values as entered.
+    void showCatalogAccount(const QString &address, const QString &username,
+                            const QString &password);
+    void closeCatalogAccount();
+    std::function<void()> catalogEditAccount;
+    std::function<void(const QString &address, const QString &username, const QString &password)>
+            catalogAccountSaved;
+    // Makes the keyboard of the account fields. setKeyboardFactory sets it too.
+    KeyboardFactory editorKeyboard;
+    std::function<void()> openCatalog, catalogBack, catalogMore, catalogChooseFolder;
+    std::function<void(int index)> catalogSelect;
+    std::function<void(const QString &path)> chooseDownloadFolder;
 
     std::function<void(const QString &key)> openBook, removeFolder, removeBook;
     // Opens a book at a saved word's position.
@@ -118,6 +144,8 @@ private:
     ui::ActionMenu *moreSheet = nullptr;
     FolderPage *folderPage = nullptr;
     FolderPicker *folderPicker = nullptr;
+    CatalogPage *catalogPage = nullptr;
+    CatalogAccountPage *catalogAccount = nullptr;
     AboutScreen *about = nullptr;
     std::unique_ptr<SavedWords> savedWords;
     QString savedWordsDirectory;
