@@ -2766,7 +2766,7 @@ void SettingsPanel::showDisabledFeatures()
     const ui::ControlIcon icons[] = { ui::ControlIcon::Compass,  ui::ControlIcon::Graph,
                                       ui::ControlIcon::Annotate, ui::ControlIcon::Bookmark,
                                       ui::ControlIcon::Sync,     ui::ControlIcon::Note,
-                                      ui::ControlIcon::Link,     ui::ControlIcon::System };
+                                      ui::ControlIcon::Link,     ui::ControlIcon::WifiHigh };
     static_assert(sizeof(icons) / sizeof(*icons) == sizeof(names) / sizeof(*names),
                   "A feature without an icon");
     QVector<ui::DescribedOption *> options;

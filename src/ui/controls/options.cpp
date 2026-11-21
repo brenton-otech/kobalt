@@ -298,8 +298,18 @@ void DescribedOption::paintEvent(QPaintEvent *)
         const QRect bounds(textLeft - iconSpace() - px(7), (height() - size) / 2 + px(1), size,
                            size);
         const auto icon = controlIcon(ControlIcon(leadingIcon), ink);
+        const auto mark = ControlIcon(leadingIcon);
+        // The Wi-Fi marks have their own painter, which fits a status-bar
+        // height; a larger square brings the mark to the weight of the others.
+        if (mark >= ControlIcon::WifiNone && mark <= ControlIcon::WifiDisconnected) {
+            const int grown = size * 4 / 3;
+            paintWifiStatusIcon(painter, mark,
+                                QRectF(bounds.center().x() - grown / 2.,
+                                       bounds.center().y() - grown / 2., grown, grown),
+                                ink);
+        }
         // Annotate uses the same custom painter as the navigation tabs.
-        if (icon.isNull())
+        else if (icon.isNull())
             paintOpeningIcon(painter, ControlIcon(leadingIcon), bounds, ink);
         else
             icon.paint(&painter, bounds);
