@@ -53,6 +53,13 @@ inline constexpr Px modeWidth{ 104 };
 // it. The cover itself names the book. Covers aim for these widths.
 inline constexpr Px smallCover{ 200 }, mediumCover{ 260 }, largeCover{ 340 };
 inline constexpr Px gridGap{ 28 }, gridTop{ 28 }, gridBarGap{ 10 };
+// A cover's label is a small plate that sits half on the cover's bottom edge
+// and half below it, a little narrower than the cover. It holds the author
+// and the series in the smallest caption size.
+inline constexpr TextPx labelText{ 18 };
+inline constexpr Px labelInset{ 12 }, labelPadding{ 6 };
+// Metadata can hold a whole list of contributors as the author.
+inline constexpr int labelAuthorLength = 20;
 // List rows use the reader's three-line height.
 inline constexpr Px thumbWidth{ 120 }, thumbHeight{ 180 }, thumbPadding{ 20 }, progressWidth{ 150 },
         barWidth{ 88 }, barHeight{ 14 };
@@ -157,6 +164,8 @@ public:
 
     View view = View::Grid;
     CoverSize coverSize = CoverSize::Medium;
+    // The cover grid's author and series plates.
+    bool labels = false;
     QVector<const Book *> books;
     int page = 0;
     std::function<void(const QString &)> openRequested, holdRequested;
@@ -404,7 +413,7 @@ private:
             const int target = coverSize == CoverSize::Small ? int(metrics::smallCover)
                     : coverSize == CoverSize::Medium         ? int(metrics::mediumCover)
                                                              : int(metrics::largeCover);
-            int below = metrics::gridBarGap + metrics::barHeight;
+            int below = metrics::gridBarGap + metrics::barHeight + labelOverhang();
             if (home)
                 below += metrics::gridBarGap + percentHeight();
             // The nearest whole number of columns and rows for the target
@@ -458,13 +467,14 @@ private:
                                      book.displayTitle(), Qt::AlignLeft | Qt::AlignTop);
     }
 
-    void paintCover(QPainter &painter, const QRect &box, const Book &book, const QColor &ink,
-                    const QColor &paper, bool fit)
+    // Returns the rectangle the cover covers inside its box.
+    QRect paintCover(QPainter &painter, const QRect &box, const Book &book, const QColor &ink,
+                     const QColor &paper, bool fit)
     {
         const auto *image = cover(book);
         if (!image) {
             paintPlainCover(painter, box, book, ink, paper);
-            return;
+            return box;
         }
         QRect target = box;
         if (fit) {
@@ -477,6 +487,75 @@ private:
         painter.setRenderHint(QPainter::SmoothPixmapTransform);
         painter.drawImage(target, *image);
         painter.restore();
+        return target;
+    }
+
+    // The author, shortened, and the series with its number. Either can be missing.
+    static QStringList labelLines(const Book &book)
+    {
+        QStringList lines;
+        auto author = book.author.simplified();
+        if (author.size() > metrics::labelAuthorLength)
+            author = author.left(metrics::labelAuthorLength - 1).trimmed() + QChar(0x2026);
+        if (!author.isEmpty())
+            lines.append(author);
+        const auto series = seriesText(book);
+        if (!series.isEmpty())
+            lines.append(series);
+        return lines;
+    }
+
+    // A long series name gives way before its number does.
+    static QString fittedSeries(const Book &book, int width)
+    {
+        const auto font = ui::captionFont(metrics::labelText);
+        const auto full = seriesText(book).toUpper();
+        if (book.seriesIndex <= 0 || ui::interfaceTextWidth(full, font) <= width)
+            return full;
+        const auto number = QLocale().toString(book.seriesIndex);
+        const auto format = strings::get("library.series_number");
+        const int rest = ui::interfaceTextWidth(format.arg(QString(), number), font);
+        return format.arg(ui::elideInterfaceText(book.series.toUpper(), font, width - rest),
+                          number);
+    }
+
+    static int labelLineHeight()
+    {
+        return ui::interfaceLineHeight(ui::captionFont(metrics::labelText));
+    }
+
+    static int labelHeight(int lines)
+    {
+        return lines * labelLineHeight() + 2 * metrics::labelPadding;
+    }
+
+    // The room below a cover for the half of a two-line plate that hangs there.
+    int labelOverhang() const { return labels && !home ? labelHeight(2) / 2 : 0; }
+
+    void paintLabel(QPainter &painter, const QRect &cover, const Book &book, const QColor &ink,
+                    const QColor &paper)
+    {
+        const auto lines = labelLines(book);
+        if (lines.isEmpty())
+            return;
+        const int height = labelHeight(lines.size());
+        const QRect plate(cover.left() + metrics::labelInset, cover.bottom() + 1 - height / 2,
+                          cover.width() - 2 * metrics::labelInset, height);
+        if (plate.width() < 4 * metrics::labelInset)
+            return;
+        painter.fillRect(plate, paper);
+        ui::paintEdges(painter, plate, Qt::LeftEdge | Qt::TopEdge | Qt::RightEdge | Qt::BottomEdge,
+                       ink, qMax(1, ui::px(2)));
+        int top = plate.top() + metrics::labelPadding;
+        const int room = plate.width() - 2 * metrics::labelPadding;
+        for (const auto &line : lines) {
+            const bool series = !book.series.isEmpty() && &line == &lines.last();
+            drawCaption(painter,
+                        QRect(plate.left() + metrics::labelPadding, top, room, labelLineHeight()),
+                        series ? fittedSeries(book, room) : line, Qt::AlignHCenter, ink,
+                        metrics::labelText);
+            top += labelLineHeight();
+        }
     }
 
     void paintList(QPainter &painter, const QColor &ink)
@@ -550,16 +629,19 @@ private:
     {
         for (const auto &hit : placed) {
             const auto &book = *hit.book;
-            paintCover(painter, hit.cover, book, ink, paper, true);
+            const auto drawn = paintCover(painter, hit.cover, book, ink, paper, true);
             // A pressed cover gets a heavy frame along its own edge, clear of the
             // progress bar and the neighbouring covers.
             if (isHighlighted(hit))
                 ui::paintEdges(painter, hit.cover,
                                Qt::LeftEdge | Qt::TopEdge | Qt::RightEdge | Qt::BottomEdge, ink,
                                ui::px(8));
+            if (labelOverhang())
+                paintLabel(painter, drawn, book, ink, paper);
             // A book in progress shows the list's outlined bar, without a number.
             if (book.status() == Status::Reading) {
-                const QRect bar(hit.cover.left(), hit.cover.bottom() + 1 + metrics::gridBarGap,
+                const QRect bar(hit.cover.left(),
+                                hit.cover.bottom() + 1 + labelOverhang() + metrics::gridBarGap,
                                 hit.cover.width(), metrics::barHeight);
                 ui::paintEdges(painter, bar,
                                Qt::LeftEdge | Qt::TopEdge | Qt::RightEdge | Qt::BottomEdge, ink,
@@ -628,17 +710,27 @@ public:
         covers->add("libraryCoverSmall", strings::get("library.cover_small"));
         covers->add("libraryCoverMedium", strings::get("library.cover_medium"));
         covers->add("libraryCoverLarge", strings::get("library.cover_large"));
-        groups = { sortHeading, sorts, showHeading, filters, coverHeading, covers };
+        labelHeading = new ui::ListHeader(this);
+        labelHeading->setShaded(true);
+        labelHeading->setCaptions(strings::get("library.label_heading"));
+        labels = new ui::RadioList(this);
+        labels->setObjectName("libraryLabelChoices");
+        labels->add("libraryLabelNone", strings::get("library.label_none"));
+        labels->add("libraryLabelAuthorSeries", strings::get("library.label_author_series"));
+        groups = { sortHeading,  sorts,  showHeading,  filters,
+                   coverHeading, covers, labelHeading, labels };
         arrange(false, true);
     }
 
-    // Cover size applies only to the cover grid.
+    // Cover size and labels apply only to the cover grid, and share a column.
     void arrange(bool sideBySide, bool grid)
     {
         coverHeading->setVisible(grid);
         covers->setVisible(grid);
+        labelHeading->setVisible(grid);
+        labels->setVisible(grid);
         for (int index = 0; index < groups.size(); ++index) {
-            const int column = sideBySide ? index / 2 : 0;
+            const int column = sideBySide ? qMin(index / 2, 2) : 0;
             for (auto *layout : columnRows)
                 layout->removeWidget(groups[index]);
             columnRows[column]->addWidget(groups[index]);
@@ -654,7 +746,7 @@ public:
         columns[2]->setVisible(sideBySide && grid);
     }
 
-    ui::RadioList *sorts, *filters, *covers;
+    ui::RadioList *sorts, *filters, *covers, *labels;
 
 protected:
     void paintEvent(QPaintEvent *event) override
@@ -668,7 +760,7 @@ protected:
 private:
     ui::Panel *columns[3];
     QVBoxLayout *columnRows[3];
-    ui::ListHeader *coverHeading;
+    ui::ListHeader *coverHeading, *labelHeading;
     QVector<QWidget *> groups;
 };
 
@@ -703,6 +795,39 @@ protected:
 
 private:
     ui::ControlIcon mark = ui::ControlIcon::WifiDisconnected;
+};
+
+// The menu cell. A dot beside its icon says that the menu has news, such as a
+// newer build.
+class MoreCell final : public ui::CellButton
+{
+public:
+    explicit MoreCell(QWidget *parent) : ui::CellButton(ui::ControlIcon::More, parent) { }
+
+    void setDot(bool value)
+    {
+        if (std::exchange(dot, value) != value)
+            update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *event) override
+    {
+        ui::CellButton::paintEvent(event);
+        if (!dot)
+            return;
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        // A pressed cell fills with ink, so the dot takes the paper colour.
+        painter.setBrush(palette().color(isDown() ? QPalette::Window : QPalette::WindowText));
+        const qreal side = chrome::cellIcon / 3.;
+        painter.drawEllipse(QRectF(width() / 2. + chrome::cellIcon / 2.,
+                                   height() / 2. - chrome::cellIcon / 2. - side / 2., side, side));
+    }
+
+private:
+    bool dot = false;
 };
 
 // A host-backed folder browser. Its header, rows and primary action match
@@ -1524,10 +1649,19 @@ LibraryView::LibraryView(const Index &index, std::function<QString(const QString
         return button;
     };
     search = cell(ui::ControlIcon::Search, "librarySearch", strings::get("library.search"));
-    more = cell(ui::ControlIcon::More, "libraryMore", strings::get("library.more"));
+    more = new MoreCell(this);
+    more->setObjectName("libraryMore");
+    more->setAccessibleName(strings::get("library.more"));
+    more->setRule(Qt::LeftEdge);
     closeSearch = cell(ui::ControlIcon::Close, "libraryCloseSearch",
                        strings::get("library.close_search"));
     closeSearch->hide();
+    night = cell(ui::ControlIcon::Moon, "libraryNight", strings::get("library.dark_turn_on"));
+    night->hide();
+    connect(night, &QPushButton::clicked, this, [this] {
+        if (setDarkMode)
+            setDarkMode(!dark);
+    });
     wifi = new WifiCell(this);
     wifi->setObjectName("libraryWifi");
     wifi->setAccessibleName(strings::get("library.wifi_turn_on"));
@@ -1614,7 +1748,14 @@ LibraryView::LibraryView(const Index &index, std::function<QString(const QString
                 applySettings(settings);
                 closeOverlay();
             };
+            sortSheet->labels->chosen = [this](int choice) {
+                auto settings = this->index.settings;
+                settings.coverLabels = choice == 1;
+                applySettings(settings);
+                closeOverlay();
+            };
         }
+        sortSheet->labels->setCurrent(this->index.settings.coverLabels ? 1 : 0);
         sortSheet->sorts->setCurrent(int(this->index.settings.sort));
         sortSheet->filters->setCurrent(this->index.settings.hideFinished ? 1 : 0);
         sortSheet->covers->setCurrent(int(this->index.settings.coverSize));
@@ -1768,6 +1909,7 @@ void LibraryView::setScanning(bool value, int count)
 void LibraryView::setDark(bool value)
 {
     dark = value;
+    night->setAccessibleName(strings::get(dark ? "library.dark_turn_off" : "library.dark_turn_on"));
     const auto colors = ui::readerPalette(palette(), dark);
     setProperty("reader_dark", dark);
     ui::applyReaderPalette(this, colors);
@@ -1923,6 +2065,12 @@ void LibraryView::setWifi(bool enabled, bool connected, int strength)
     QWidget::update();
 }
 
+void LibraryView::setUpdateAvailable(bool available)
+{
+    updateAvailable = available;
+    more->setDot(available);
+}
+
 void LibraryView::hideWifi()
 {
     if (std::exchange(wifiShown, false))
@@ -1966,6 +2114,7 @@ void LibraryView::rebuild(bool keepPage)
     // Home shows the largest covers; the cover grid uses the chosen size.
     pages->coverSize = home ? CoverSize::Large : settings.coverSize;
     pages->home = home;
+    pages->labels = settings.coverLabels;
     if (home) {
         // The books in progress as covers, the most recently opened first.
         pages->view = View::Grid;
@@ -2034,9 +2183,14 @@ void LibraryView::arrange()
     x -= chrome::cellWidth;
     (searching ? static_cast<QWidget *>(closeSearch) : static_cast<QWidget *>(search))
             ->setGeometry(x, 0, chrome::cellWidth, bar);
+    // Left of Search: dark mode beside it, then Wi-Fi.
+    int switchX = x;
+    night->setVisible(setDarkMode && !searching);
+    if (setDarkMode && !searching)
+        night->setGeometry(switchX -= chrome::cellWidth, 0, chrome::cellWidth, bar);
     wifi->setVisible(wifiShown && !searching);
     if (wifiShown && !searching)
-        wifi->setGeometry(x - chrome::cellWidth, 0, chrome::cellWidth, bar);
+        wifi->setGeometry(switchX - chrome::cellWidth, 0, chrome::cellWidth, bar);
     const int left = 0;
     query->setGeometry(left, 0, qMax(1, x - left), bar);
     query->setTextMargins(chrome::inset, 0, chrome::inset, 0);
@@ -2175,6 +2329,19 @@ void LibraryView::showBookMenu(const QString &key)
                                     }));
     items.append(ui::actionItem(strings::get("library.remove_book"), "libraryBookMenuRemove",
                                 ui::ControlIcon::Trash, [this, key] { confirmRemove(key); }));
+    if (deleteBook)
+        items.append(ui::actionItem(strings::get("library.delete_book"), "libraryBookMenuDelete",
+                                    ui::ControlIcon::Trash, [this, key] {
+                                        if (!index.books.contains(key))
+                                            return;
+                                        showChoice(strings::get("library.delete_book_title"),
+                                                   strings::get("library.delete_book_description")
+                                                           .arg(index.books[key].title),
+                                                   strings::get("library.delete"), [this, key] {
+                                                       if (deleteBook)
+                                                           deleteBook(key);
+                                                   });
+                                    }));
     showMenu(new ui::ActionMenu(this, header, items), "libraryBookMenu");
 }
 
@@ -2270,9 +2437,10 @@ void LibraryView::showMoreSheet()
                     strings::get("library.my_words"), "libraryMoreWords", ui::ControlIcon::Note,
                     [this] { showWords(); }, true));
         if (checkForUpdates)
-            items.append(ui::actionItem(strings::get("update.check"), "libraryMoreUpdate",
-                                        ui::ControlIcon::Sync,
-                                        [this] { QTimer::singleShot(0, this, checkForUpdates); }));
+            items.append(ui::actionItem(
+                    strings::get(updateAvailable ? "update.available" : "update.check"),
+                    "libraryMoreUpdate", ui::ControlIcon::Sync,
+                    [this] { QTimer::singleShot(0, this, checkForUpdates); }));
         items.append(ui::actionItem(
                 strings::get("library.about"), "libraryMoreAbout", ui::ControlIcon::About,
                 [this] { showAbout(); }, true));

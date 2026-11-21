@@ -196,6 +196,8 @@
 "library.search_placeholder" = "Title, author or series";
 "library.close_search" = "Close search";
 "library.wifi_turn_on" = "Turn Wi-Fi on";
+"library.dark_turn_on" = "Turn dark mode on";
+"library.dark_turn_off" = "Turn dark mode off";
 "library.wifi_turn_off" = "Turn Wi-Fi off";
 "library.add_folder" = "Add folder";
 "library.use_folder" = "Use this folder";
@@ -211,6 +213,7 @@
 
 /* update */
 "update.check" = "Check for updates";
+"update.available" = "Update available";
 "update.title" = "Kobalt update";
 "update.checking" = "Checking for a newer build…";
 "update.up_to_date" = "Kobalt is up to date.";
@@ -235,6 +238,7 @@
 "catalog.no_epub" = "No EPUB available";
 "catalog.downloading" = "Downloading…";
 "catalog.downloaded" = "Downloaded";
+"catalog.already_downloaded" = "Already in the download folder";
 "catalog.loading" = "Loading catalog…";
 "catalog.empty" = "This section is empty.";
 "catalog.folder" = "Download folder";
@@ -257,6 +261,9 @@
 "library.show_all" = "All books";
 "library.hide_finished" = "Hide finished";
 "library.cover_heading" = "Cover size";
+"library.label_heading" = "Cover labels";
+"library.label_none" = "None";
+"library.label_author_series" = "Author and series";
 "library.cover_small" = "Small";
 "library.cover_medium" = "Medium";
 "library.cover_large" = "Large";
@@ -295,6 +302,11 @@
 "library.remove_book_description" = "The book file and reading progress stay on your device. A book in a library folder comes back when the folder is scanned again.";
 "library.remove_copy_description" = "Kobalt's copy of this book is deleted. Reading progress stays on your device.";
 "library.remove" = "Remove";
+"library.delete_book" = "Delete book";
+"library.delete_book_title" = "Delete this book?";
+"library.delete_book_description" = "%1\n\nThe book file is deleted from this device and cannot be recovered. Bookmarks, highlights and reading progress are kept.";
+"library.delete" = "Delete";
+"library.delete_failed" = "The book file could not be deleted.";
 "library.back" = "Back to library";
 "library.open_failed" = "The book could not be opened.";
 "library.folder_unavailable" = "This folder cannot be read. Add it again to give Kobalt access.";

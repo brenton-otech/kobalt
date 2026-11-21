@@ -24,6 +24,10 @@
 #include <QtMath>
 #include <QPushButton>
 #include <QStackedWidget>
+#include <QThreadPool>
+#include <QPointer>
+#include <QFile>
+#include <QJsonObject>
 #include <QVBoxLayout>
 #include <utility>
 
@@ -193,16 +197,29 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
             }
             start->library()->showNotice(strings::get("update.title"),
                                          strings::get("update.checking"));
+            // This replaces a quiet check that is still running.
+            quietUpdateCheck = false;
+            updateChecking = true;
             updater->check();
         };
     connect(updater, &Updater::upToDate, this, [this] {
-        start->library()->showNotice(strings::get("update.title"),
-                                     strings::get("update.up_to_date"));
+        updateChecking = false;
+        start->library()->setUpdateAvailable(false);
+        if (!std::exchange(quietUpdateCheck, false))
+            start->library()->showNotice(strings::get("update.title"),
+                                         strings::get("update.up_to_date"));
     });
     connect(updater, &Updater::failed, this, [this](const QString &message) {
-        start->library()->showNotice(strings::get("update.title"), message);
+        updateChecking = false;
+        if (!std::exchange(quietUpdateCheck, false))
+            start->library()->showNotice(strings::get("update.title"), message);
     });
     connect(updater, &Updater::found, this, [this](const QString &description) {
+        updateChecking = false;
+        start->library()->setUpdateAvailable(true);
+        // A quiet check only marks the menu; the entry there offers the update.
+        if (std::exchange(quietUpdateCheck, false))
+            return;
         start->library()->showChoice(
                 strings::get("update.title"), strings::get("update.found").arg(description),
                 strings::get("update.install"), [this] {
@@ -219,6 +236,43 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
                 });
     });
     // The header switch is the stock airplane mode, as in the reader's System settings.
+    // Delete book: the file goes, on a worker; saved reading data stays. Only
+    // a file inside Kindle storage that the Library lists is deleted.
+    libraryView->deleteBook = [this, folderStorageRoot](const QString &key) {
+        const QFileInfo file(key);
+        const auto path = file.canonicalFilePath();
+        const auto root = QFileInfo(folderStorageRoot).canonicalFilePath();
+        if (!controller.idle() || !store.index().books.contains(key) || path.isEmpty()
+            || root.isEmpty() || !path.startsWith(root + QLatin1Char('/')) || !file.isFile()) {
+            start->library()->showNotice(strings::get("library.delete_book"),
+                                         strings::get("library.delete_failed"));
+            return;
+        }
+        QThreadPool::globalInstance()->start([this, guard = QPointer<Window>(this), key, path] {
+            const bool removed = QFile::remove(path) || !QFileInfo::exists(path);
+            QMetaObject::invokeMethod(
+                    QCoreApplication::instance(),
+                    [this, guard, key, removed] {
+                        if (!guard)
+                            return;
+                        if (removed)
+                            store.removeBook(key);
+                        else
+                            start->library()->showNotice(strings::get("library.delete_book"),
+                                                         strings::get("library.delete_failed"));
+                    },
+                    Qt::QueuedConnection);
+        });
+    };
+    // The reader's dark mode setting, switched from the Library header. The
+    // save runs on a worker; the next book opens with the saved value.
+    libraryView->setDarkMode = [this, path = paths.preferences()](bool enabled) {
+        start->setDark(enabled);
+        QThreadPool::globalInstance()->start([path, enabled] {
+            storage::updatePreferences(path, QJsonObject{ { "dark_mode", !enabled } },
+                                       QJsonObject{ { "dark_mode", enabled } });
+        });
+    };
     libraryView->setWifiEnabled = [device = device](bool enabled) {
         device->setWirelessEnabled(enabled);
     };
@@ -234,6 +288,24 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     connect(device.get(), &Device::wifiChanged, this, showWifi);
     connect(&controller, &standalone::ReaderController::closed, this, showWifi);
     showWifi();
+    // Look for a newer build by itself while the Library shows and Wi-Fi is
+    // already connected. It never turns Wi-Fi on, and a check that reached a
+    // repository is not repeated until Kobalt starts again.
+    const auto quietCheck = [this] {
+        const auto &wifi = device->state().wifi;
+        if (!updater->available() || !controller.idle() || !wifi.enabled || !wifi.connected
+            || updateChecking || quietUpdateChecks >= maxQuietUpdateChecks)
+            return;
+        ++quietUpdateChecks;
+        quietUpdateCheck = updateChecking = true;
+        updater->check();
+    };
+    connect(updater, &Updater::upToDate, this,
+            [this] { quietUpdateChecks = maxQuietUpdateChecks; });
+    connect(updater, &Updater::found, this, [this] { quietUpdateChecks = maxQuietUpdateChecks; });
+    connect(device.get(), &Device::wifiChanged, this, quietCheck);
+    connect(&controller, &standalone::ReaderController::closed, this, quietCheck);
+    QTimer::singleShot(0, this, quietCheck);
     libraryView->openCatalog = [this, editCatalogAccount] {
         // Without an account the catalog starts at its account screen.
         if (!catalog->account().url.isValid()) {

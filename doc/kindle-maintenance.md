@@ -139,6 +139,32 @@ mode. The Library reads that setting at start and when a book closes. The
 switch has headless captures of the Library header only; its behaviour on a
 physical Kindle and the reading-menu target need a device check.
 
+## Cover labels
+
+The cover grid's sort sheet has **Cover labels**: None, or Author and series.
+With labels, each cover carries a small plate that sits half on its bottom
+edge and half below it, so little of the cover is hidden and the rows lose
+little height. The plate holds the author, cut to twenty characters because
+metadata can list every contributor there, and the series with its number. A
+long series name is shortened before its number. A book with neither has no
+plate. The choice is `cover_labels` in the Library settings and defaults to
+off. Home keeps bare covers.
+
+## Deleting a book
+
+A book's menu in the Library has **Delete book** below Remove from library.
+After a confirmation it deletes the book file on a worker thread and takes
+the book out of the Library. Only a file inside Kindle storage that the
+Library lists is deleted. Bookmarks, highlights and reading progress stay in
+the profile, so the book resumes if the same file returns.
+
+## Dark mode switch
+
+The Library header has a moon cell left of Search. It switches the reader's
+`dark_mode` preference, the same one as Dark mode in the reading settings, so
+the Library changes at once and the next book opens in the chosen mode. The
+save runs on a worker thread.
+
 ## KOSync and Wi-Fi
 
 While the user has the radio off, with the Wi-Fi switch or Airplane mode, KOSync
@@ -163,6 +189,13 @@ launcher and KPM is installed. The check runs `kpm list-repo`, reads each
 repository manifest and compares the newest `kobalt` artifact for the platform
 with the package version compiled into the build. It needs Wi-Fi and does not
 turn it on.
+
+Kobalt also runs the check by itself when the Library shows and Wi-Fi is
+already connected: at start, when a book closes and when Wi-Fi connects. This
+check reports nothing unless it finds a newer build. Then the menu button
+carries a dot and the entry reads **Update available**; choosing it checks
+again and offers the update. A check that reached a repository is not repeated
+until Kobalt starts again, and a failing one is tried three times at most.
 
 KPM cannot replace a running Kobalt, so **Update and restart** shows a notice
 and exits the reader with status 75. The supervisor, which still holds the
@@ -224,7 +257,10 @@ storage. One worker thread writes the file.
 The first row of the catalog screen is the download folder. Tap it to choose a
 folder inside Kindle storage; Kobalt saves the choice as `folder` in `opds.json`
 and asks for it when a book is chosen first. A downloaded book is saved as
-`Author - Title.epub`, and a second copy gets ` (2)`. A download folder outside
+`Author - Title.epub`. A catalog gives no checksum to compare, so that name
+is how Kobalt knows a book: an entry whose file is already in the download
+folder shows as downloaded and is not downloaded again. Delete or rename the
+file to fetch it afresh. A download folder outside
 the Library folders becomes a Library folder, so the book appears. Sections
 open their feeds, Back returns to the previous feed, and **Load more** appends
 the feed's next page. Only EPUB acquisition links are offered. One book

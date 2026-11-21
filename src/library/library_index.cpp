@@ -140,6 +140,7 @@ bool Index::restore(const QJsonObject &root)
     settings.hideFinished = options.value("hide_finished").toBool(false);
     settings.coverSize =
             named(options.value("cover_size").toString(), coverSizes, CoverSize::Medium);
+    settings.coverLabels = options.value("cover_labels").toBool(false);
     settings.checkAtStart = options.value("check_at_start").toBool(true);
     return true;
 }
@@ -154,6 +155,7 @@ bool Index::save(const QString &path) const
     const QJsonObject options{ { "view", QLatin1String(views[int(settings.view)]) },
                                { "sort", QLatin1String(sorts[int(settings.sort)]) },
                                { "hide_finished", settings.hideFinished },
+                               { "cover_labels", settings.coverLabels },
                                { "cover_size", QLatin1String(coverSizes[int(settings.coverSize)]) },
                                { "check_at_start", settings.checkAtStart } };
     return storage::writeJson(path,

@@ -57,7 +57,8 @@ public:
     void setAccount(const QUrl &url, const QString &username, const QString &password);
     // Loads the catalog's first feed with the current account.
     void open();
-    // Opens a section, or downloads a book.
+    // Opens a section, or downloads a book. A book whose file is already in
+    // the download folder is not downloaded again.
     void select(int index);
     // Returns to the previous feed. False at the first feed.
     bool back();
@@ -98,6 +99,9 @@ private:
     Listing listing(const QString &error = { }) const;
     void fetch(const QUrl &url);
     void download(int index);
+    // A catalog gives no checksum, so a book is known by the file name its
+    // download would take: author and title in the download folder.
+    bool owned(const Entry &entry) const;
     void save();
 };
 } // namespace kobalt::opds

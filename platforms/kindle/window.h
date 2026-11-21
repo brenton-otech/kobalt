@@ -82,6 +82,11 @@ private:
     opds::Browser *catalog;
     bool catalogFolderPending = false;
     Updater *updater;
+    // A check started by Kobalt itself reports nothing but a newer build.
+    // Failed attempts, such as Wi-Fi without internet, are tried a few times.
+    static constexpr int maxQuietUpdateChecks = 3;
+    bool quietUpdateCheck = false, updateChecking = false;
+    int quietUpdateChecks = 0;
     standalone::WidgetCanvas *canvas;
     QLabel *sleepView, *retirementView;
     QTimer standby;

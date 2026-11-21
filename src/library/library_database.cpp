@@ -39,6 +39,7 @@ QJsonObject options(const Settings &settings)
     result["view"] = QLatin1String(views[int(settings.view)]);
     result["sort"] = QLatin1String(sorts[int(settings.sort)]);
     result["cover_size"] = QLatin1String(covers[int(settings.coverSize)]);
+    result["cover_labels"] = settings.coverLabels;
     result["hide_finished"] = settings.hideFinished;
     result["check_at_start"] = settings.checkAtStart;
     return result;
@@ -61,6 +62,7 @@ Settings parseSettings(const QJsonObject &object)
         result.coverSize = CoverSize::Small;
     else if (cover == "large")
         result.coverSize = CoverSize::Large;
+    result.coverLabels = object.value("cover_labels").toBool(false);
     result.hideFinished = object.value("hide_finished").toBool(false);
     result.checkAtStart = object.value("check_at_start").toBool(true);
     return result;

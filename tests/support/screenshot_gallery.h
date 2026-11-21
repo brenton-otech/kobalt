@@ -252,6 +252,7 @@ inline const QMap<QString, QString> &screenshotTitles()
         { "library-folders", "Book folders" },
         { "library-folders-empty", "No book folders" },
         { "library-grid", "All books" },
+        { "library-grid-labels", "Cover labels" },
         { "library-grid-large", "Large covers" },
         { "library-grid-last", "All books · Last page" },
         { "library-grid-new", "Books not yet started" },

@@ -55,6 +55,8 @@ struct Settings
     View view = View::Grid;
     Sort sort = Sort::Opened;
     CoverSize coverSize = CoverSize::Medium;
+    // The cover grid names each book's author and series on a small plate.
+    bool coverLabels = false;
     bool hideFinished = false;
     bool checkAtStart = true;
 };

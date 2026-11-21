@@ -34,6 +34,7 @@ class FolderPicker;
 class CatalogPage;
 class CatalogAccountPage;
 class WifiCell;
+class MoreCell;
 
 struct FolderLocation
 {
@@ -74,6 +75,8 @@ public:
                     std::function<void()> accepted);
     // A set checkForUpdates adds Check for updates to the menu.
     std::function<void()> checkForUpdates;
+    // Marks the menu and renames its update entry when a newer build is known.
+    void setUpdateAvailable(bool available);
     // The system back action: closes the topmost layer. False when only the
     // library itself is left.
     bool dismiss();
@@ -85,6 +88,9 @@ public:
     void setWifi(bool enabled, bool connected, int strength);
     void hideWifi();
     std::function<void(bool enabled)> setWifiEnabled;
+    // A set setDarkMode adds the dark mode switch left of Search. The host
+    // saves the choice and answers through setDark.
+    std::function<void(bool enabled)> setDarkMode;
     void showFolderPicker(const QString &path, bool books = false, bool download = false);
 
     void showBookPicker(const QString &path) { showFolderPicker(path, true); }
@@ -116,6 +122,9 @@ public:
     std::function<void(const QString &path)> chooseDownloadFolder;
 
     std::function<void(const QString &key)> openBook, removeFolder, removeBook;
+    // A set deleteBook adds Delete book to a book's menu. After the user
+    // confirms, the host deletes the book file itself.
+    std::function<void(const QString &key)> deleteBook;
     // Opens a book at a saved word's position.
     std::function<void(const QString &key, const QString &position)> openPassage;
     // Adds My Words to the menu. Words live in the profile database there.
@@ -142,7 +151,9 @@ protected:
 private:
     const Index &index;
     std::function<QString(const QString &)> coverPath;
-    ui::CellButton *search, *more, *closeSearch;
+    ui::CellButton *search, *closeSearch, *night;
+    MoreCell *more;
+    bool updateAvailable = false;
     WifiCell *wifi;
     bool wifiShown = false, wifiEnabled = false;
     QVector<ui::CellButton *> modes;

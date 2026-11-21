@@ -19608,7 +19608,9 @@ private slots:
                           {} });
             };
             view->findChild<QPushButton *>("libraryFoldersAdd")->click();
-            QTRY_VERIFY(view->findChild<QWidget *>("libraryFolderPicker")->isVisible());
+            // The picker opens on the next event loop pass.
+            QTRY_VERIFY(view->findChild<QWidget *>("libraryFolderPicker")
+                        && view->findChild<QWidget *>("libraryFolderPicker")->isVisible());
             QVERIFY(capture(fixture, name + "-folder-picker"));
             view->setFolderPickerLocation({ "/mnt/us/Books",
                                             "/mnt/us",
@@ -19726,6 +19728,18 @@ private slots:
             press("librarySort");
             press("libraryCoverLarge");
             QVERIFY(capture(fixture, name + "-grid-large"));
+            // Each cover carries its author and series on a plate; then the
+            // plates go again, so the later captures keep bare covers.
+            press("librarySort");
+            press("libraryCoverMedium");
+            press("librarySort");
+            press("libraryLabelAuthorSeries");
+            QVERIFY(view->findChild<QWidget *>("librarySortSheet")->isHidden());
+            QVERIFY(capture(fixture, name + "-grid-labels"));
+            press("librarySort");
+            press("libraryLabelNone");
+            press("librarySort");
+            press("libraryCoverLarge");
             press("libraryPrevious"); // The pager wraps from the first page to the last.
             QVERIFY(capture(fixture, name + "-grid-last"));
             press("libraryMore");

@@ -1,6 +1,7 @@
 #include "browser.h"
 #include "client.h"
 #include "support/strings.h"
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -110,6 +111,8 @@ Listing Browser::listing(const QString &error) const
         item.detail = entry.acquisition ? entry.author : entry.summary;
         if (entry.acquisition && !epubLink(entry))
             item.detail = strings::get("catalog.no_epub");
+        else if (owned(entry))
+            item.detail = strings::get("catalog.downloaded");
         result.items.append(item);
     }
     return result;
@@ -197,12 +200,22 @@ void Browser::select(int index)
     }
     if (!epubLink(entry) || downloading >= 0)
         return;
+    if (owned(entry)) {
+        emit itemChanged(index, strings::get("catalog.already_downloaded"));
+        return;
+    }
     if (current.folder.isEmpty() || !QFileInfo(current.folder).isDir()) {
         waiting = index;
         emit folderNeeded();
         return;
     }
     download(index);
+}
+
+bool Browser::owned(const Entry &entry) const
+{
+    return entry.acquisition && !current.folder.isEmpty()
+            && QFileInfo::exists(QDir(current.folder).filePath(fileName(entry)));
 }
 
 void Browser::download(int index)

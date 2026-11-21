@@ -192,15 +192,18 @@ int main(int argc, char **argv)
                             == "secret",
             "Saving the folder lost the password");
 
-    // A second download of the same book keeps the first file.
+    // A book that is already in the folder is not downloaded again.
+    const int downloadRequests = server.requests.count("/download/1.epub");
     browser.select(0);
-    waitFor([&] { return files.size() == 2; }, "The second download did not finish");
-    require(files[1] == folder + "/Ann Author - First (2).epub", "A download replaced a file");
+    require(details.size() == 3 && details[2].startsWith("0:") && files.size() == 1
+                    && server.requests.count("/download/1.epub") == downloadRequests
+                    && !QFileInfo::exists(folder + "/Ann Author - First (2).epub"),
+            "A book in the download folder was downloaded again");
 
     // A failed download reports on its row and frees the next one.
     browser.select(1);
-    waitFor([&] { return details.size() == 6; }, "A failed download was not reported");
-    require(files.size() == 2, "A missing book was saved");
+    waitFor([&] { return details.size() == 5; }, "A failed download was not reported");
+    require(files.size() == 1, "A missing book was saved");
 
     // Another browser reads the saved account back.
     Browser second(accountPath, &network);
