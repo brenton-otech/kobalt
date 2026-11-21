@@ -168,7 +168,12 @@ Kobalt. The helper waits up to three minutes for the run folder to go, runs
 `kpm -y install kobalt`, which takes the newest Kobalt and leaves other
 packages alone, and then starts whichever Kobalt is installed, so a failed
 install returns to the old build. The stock Kindle screen shows while the
-package downloads and installs. `logs/update.log` records each step.
+package downloads and installs. The helper holds a lock,
+`/var/tmp/kobalt-update/active` with its process ID, from its start until it
+hands over to the launcher. The launcher refuses to start Kobalt while that
+process lives, so opening Kobalt during the update cannot run a half-installed
+build, and it removes a lock whose helper has died. The helper writes one line
+on the stock screen with `eips`, which the stock interface can draw over. `logs/update.log` records each step.
 
 KPM upgrades a package only from the repository it was installed from, and
 never one installed from a local file; install Kobalt from the repository once

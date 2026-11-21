@@ -13,6 +13,20 @@ case "${1:-}" in
         ;;
 esac
 APP_DIR=$(CDPATH='' cd "$(dirname "$0")/.." && pwd -P)
+# An update in progress owns the installation: KPM is replacing these files.
+# A lock whose helper has died is stale and is removed.
+UPDATE_LOCK=${KOBALT_UPDATE_LOCK:-/var/tmp/kobalt-update/active}
+if [ -d "$UPDATE_LOCK" ]; then
+    update_pid=$(cat "$UPDATE_LOCK/pid" 2>/dev/null) || update_pid=
+    case "$update_pid" in ''|*[!0-9]*) update_pid= ;; esac
+    if [ -n "$update_pid" ] && kill -0 "$update_pid" 2>/dev/null; then
+        echo 'Kobalt is updating. It starts again when the update is done.' >&2
+        ! command -v eips >/dev/null 2>&1 || eips 2 2 'Kobalt is updating. It starts again when done.' >/dev/null 2>&1 || :
+        exit 1
+    fi
+    rm -f "$UPDATE_LOCK/pid"
+    rmdir "$UPDATE_LOCK" 2>/dev/null || :
+fi
 if [ "$(uname -s)" != Linux ]; then
     echo 'Kobalt Kindle requires Kindle Linux.' >&2
     exit 1

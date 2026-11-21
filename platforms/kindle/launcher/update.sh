@@ -9,6 +9,9 @@ set -u
 APP_DIR=$1
 RUN_DIR=$2
 KPM=${KOBALT_KPM:-/var/local/kmc/bin/kpm}
+# The launcher refuses to start Kobalt while this folder names a living helper,
+# so a tap on Kobalt during the update cannot start a half-installed build.
+LOCK=${KOBALT_UPDATE_LOCK:-/var/tmp/kobalt-update/active}
 # The exit can include a final save and the stock UI's return. Ten ticks a second.
 WAIT_TICKS=${KOBALT_UPDATE_WAIT_TICKS:-1800}
 LOG=$APP_DIR/logs/update.log
@@ -19,6 +22,25 @@ say()
 {
     echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) $*"
 }
+
+# One line on the stock screen, which shows while the update runs. Best effort:
+# the stock interface can draw over it.
+show()
+{
+    command -v eips >/dev/null 2>&1 || return 0
+    eips 2 2 "$1" >/dev/null 2>&1 || :
+}
+
+unlock()
+{
+    rm -f "$LOCK/pid"
+    rmdir "$LOCK" 2>/dev/null || :
+}
+
+mkdir -p "$LOCK" || exit 1
+echo "$$" >"$LOCK/pid"
+trap unlock EXIT
+trap 'exit 143' HUP INT TERM
 
 {
     say 'Update requested; waiting for Kobalt to exit.'
@@ -31,6 +53,7 @@ say()
         say 'Kobalt did not exit; the update was not attempted.'
         exit 1
     fi
+    show 'Updating Kobalt. It starts again when the update is done.'
     if [ ! -x "$KPM" ]; then
         say "KPM is missing at $KPM; the update was not attempted."
     else
@@ -39,6 +62,9 @@ say()
         say "kpm install kobalt exited with status $?."
     fi
     say 'Starting Kobalt.'
+    show 'Starting Kobalt...                                         '
+    # The launcher takes over from here; it must not find this helper's lock.
+    unlock
     sh "$APP_DIR/launcher/launch.sh"
     say "Launcher exited with status $?."
 } >>"$LOG" 2>&1
