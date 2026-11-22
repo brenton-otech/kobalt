@@ -102,6 +102,9 @@ struct ReaderHostServices
     QStringList sleepOverlayDirectories;
     // Optional host paths for user-supplied sleep wallpapers.
     QStringList sleepWallpaperDirectories;
+    // Optional host text for the wallpaper help, naming where this device keeps
+    // them. Empty uses the Kobo text.
+    QString sleepWallpaperHelp;
     // Optional live native preferences for the stock sleep-screen preview.
     std::function<sleep::NativePreview()> nativeSleepPreview;
     // Optional host reader-selection preference. Both callbacks are supplied

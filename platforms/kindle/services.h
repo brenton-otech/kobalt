@@ -3,5 +3,7 @@
 
 namespace kobalt::kindle {
 class Device;
-ReaderHostServices readerServices(std::shared_ptr<Device> device);
+// wallpaperDirectories enables the Wallpaper background of the sleep-screen editor.
+ReaderHostServices readerServices(std::shared_ptr<Device> device,
+                                  QStringList wallpaperDirectories = {});
 } // namespace kobalt::kindle

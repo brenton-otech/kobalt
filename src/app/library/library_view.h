@@ -75,6 +75,9 @@ public:
                     std::function<void()> accepted);
     // A set checkForUpdates adds Check for updates to the menu.
     std::function<void()> checkForUpdates;
+    // A set chooseSleepWallpapers adds Sleep wallpapers to the menu, for hosts
+    // that let the reader pick the folder of their sleep pictures.
+    std::function<void()> chooseSleepWallpapers;
     // Marks the menu and renames its update entry when a newer build is known.
     void setUpdateAvailable(bool available);
     // The system back action: closes the topmost layer. False when only the
@@ -94,6 +97,11 @@ public:
     void showFolderPicker(const QString &path, bool books = false, bool download = false);
 
     void showBookPicker(const QString &path) { showFolderPicker(path, true); }
+
+    // A folder picker for a host setting, with its own title and description.
+    // Use folder reports the folder to chosen instead of chooseFolder.
+    void showFolderPicker(const QString &path, const QString &title, const QString &description,
+                          std::function<void(const QString &path)> chosen);
 
     void setFolderPickerLocation(const FolderLocation &location);
     void setFolderPickerLoading(const QString &path);
@@ -168,6 +176,8 @@ private:
     ui::ActionMenu *moreSheet = nullptr;
     FolderPage *folderPage = nullptr;
     FolderPicker *folderPicker = nullptr;
+    // Set while the picker chooses a folder for a host setting.
+    std::function<void(const QString &)> hostFolderChosen;
     CatalogPage *catalogPage = nullptr;
     CatalogAccountPage *catalogAccount = nullptr;
     AboutScreen *about = nullptr;

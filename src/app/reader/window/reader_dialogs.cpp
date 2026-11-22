@@ -1419,7 +1419,9 @@ void Reader::showSleepWallpaperHelp()
         return;
     // The same explaining card as the PNG help, above the Custom editor.
     auto *notice = new ui::NoticeModal(this,
-                                       { strings::get("sleep.wallpaper_help"),
+                                       { services.sleepWallpaperHelp.isEmpty()
+                                                 ? strings::get("sleep.wallpaper_help")
+                                                 : services.sleepWallpaperHelp,
                                          strings::get("sleep.wallpaper_help_title"),
                                          {},
                                          "rrSleepWallpaperHelpTitle" },

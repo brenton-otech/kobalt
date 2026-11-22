@@ -232,6 +232,29 @@ for updates to work. `kindle.launcher` checks the update paths with a fake KPM,
 manifest and version reading. The Kindle can still go to sleep while KPM
 runs; that case is untested.
 
+## Sleep wallpapers
+
+The reader's own sleep pictures work on every Kindle target. **Sleep
+wallpapers** in the Library menu opens the folder picker with its own title
+and description; **Use folder** saves the choice in `sleep-wallpapers.json`
+beside `opds.json`, on a worker. Without a saved choice the folder is
+`/mnt/us/kobalt-wallpapers`. It is outside the app folder, so a ZIP or KPM
+update never touches it. Kindle passes the folder to the reader as
+`sleepWallpaperDirectories`, which turns on the Wallpaper background of the
+Custom sleep-screen editor: one stop for each PNG or JPEG, and Random
+wallpaper, as on Kobo (see [Sleep](reader/sleep.md)). The editor's help names
+the Kindle folder instead of the Kobo one.
+
+A sleep in the Library, with no book open, shows a random picture from the
+folder in place of the "Kobalt Sleeping" text. The picture is decoded on a
+worker at start, after each wake and when the folder changes, so the sleep
+itself never waits for storage. It covers the screen and is cropped at its
+longer side; grayscale panels keep it at one byte a pixel. An empty or
+unreadable folder keeps the text. A sleep with a book open uses the reader's
+own sleep design. `kindle.sleep-wallpapers` checks the saved folder, the
+default and the prepared picture; the menu entry and the device sleep need a
+device check.
+
 ## Fonts
 
 The font picker has three sources on a Kindle. Recommended fonts come from the

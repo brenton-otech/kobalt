@@ -1053,6 +1053,9 @@
 "sleep.wallpaper_random" = "Random wallpaper";
 "sleep.wallpaper_help_title" = "Wallpapers";
 "sleep.wallpaper_help" = "Did you know you can use your own wallpapers? Copy PNG or JPEG images to .adds/kobalt/wallpapers on your Kobo. Each image becomes a step in the Background row, and Random wallpaper picks a different one every time your Kobo sleeps.";
+"sleep.kindle_wallpaper_folder_description" = "PNG and JPEG images in this folder become sleep wallpapers.";
+/* Arguments: %1 */
+"sleep.kindle_wallpaper_help" = "Did you know you can use your own wallpapers? Copy PNG or JPEG images to %1 on your Kindle, or choose another folder with Sleep wallpapers in the Library menu. Each image becomes a step in the Background row, and Random wallpaper picks a different one every time your Kindle sleeps.";
 /* Arguments: %1 position, %2 count */
 "sleep.step_count" = "%1 of %2";
 /* Arguments: %1 sleep screen name */
@@ -1977,6 +1980,7 @@
 "words.no_entry_detail" = "The dictionary had no entry for this word. You added it to My Words yourself.";
 
 /* Android resource folders */
+"library.sleep_wallpapers" = "Sleep wallpapers";
 "library.resource_folders" = "Resource folders";
 "library.resource_folders_description" = "Choose folders for dictionaries, fonts and custom icons. Changes load when you next open a book.";
 "library.dictionary_folder" = "Dictionaries";

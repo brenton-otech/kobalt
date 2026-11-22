@@ -19,6 +19,7 @@ namespace kobalt::kindle {
 class Device;
 class FolderBrowser;
 class Updater;
+class SleepWallpapers;
 
 class Window final : public QWidget
 {
@@ -89,6 +90,7 @@ private:
     int quietUpdateChecks = 0;
     standalone::WidgetCanvas *canvas;
     QLabel *sleepView, *retirementView;
+    SleepWallpapers *wallpapers = nullptr;
     QTimer standby;
     std::unique_ptr<KeyboardController> libraryKeyboard;
     QPointer<QLineEdit> libraryQuery;
@@ -103,5 +105,6 @@ private:
     void recordProgress();
     void sleepingChanged(bool sleeping);
     void updateSleepView();
+    void prepareWallpaper();
 };
 } // namespace kobalt::kindle

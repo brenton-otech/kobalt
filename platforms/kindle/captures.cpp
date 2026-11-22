@@ -90,6 +90,30 @@ void captureScreens(Window &window, const QString &book, const QString &director
                 if (!save("07-library-more"))
                     return;
                 auto *start = window.findChild<standalone::StartScreen *>();
+                auto *wallpapers = start->library()->findChild<QAbstractButton *>(
+                        "libraryMoreSleepWallpapers");
+                if (!wallpapers) {
+                    fail(QStringLiteral("Sleep wallpapers entry is unavailable"));
+                    return;
+                }
+                wallpapers->click();
+                state->stage = -10;
+                state->settled.restart();
+            } else if (state->stage == -10) {
+                if (!save("07b-sleep-wallpapers"))
+                    return;
+                auto *library = window.findChild<standalone::StartScreen *>()->library();
+                library->closeFolderPicker();
+                auto *more = library->findChild<QAbstractButton *>("libraryMore");
+                if (!more) {
+                    fail(QStringLiteral("Library menu is unavailable"));
+                    return;
+                }
+                more->click();
+                state->stage = -11;
+                state->settled.restart();
+            } else if (state->stage == -11) {
+                auto *start = window.findChild<standalone::StartScreen *>();
                 auto *catalog =
                         start->library()->findChild<QAbstractButton *>("libraryMoreCatalog");
                 if (!catalog) {

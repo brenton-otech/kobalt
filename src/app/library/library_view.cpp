@@ -895,6 +895,13 @@ public:
                                                : "library.folder_picker_description"));
     }
 
+    // A host setting's folder uses the folder rows with the host's captions.
+    void setCaptions(const QString &heading, const QString &description)
+    {
+        title->setText(heading);
+        location->setDetail(description);
+    }
+
     // The catalog's download folder uses the folder rows with its own captions.
     void setDownloadMode(bool value)
     {
@@ -2441,6 +2448,11 @@ void LibraryView::showMoreSheet()
             items.append(ui::actionItem(
                     strings::get("library.my_words"), "libraryMoreWords", ui::ControlIcon::Note,
                     [this] { showWords(); }, true));
+        if (chooseSleepWallpapers)
+            items.append(ui::actionItem(
+                    strings::get("library.sleep_wallpapers"), "libraryMoreSleepWallpapers",
+                    ui::ControlIcon::Mountains,
+                    [this] { QTimer::singleShot(0, this, chooseSleepWallpapers); }, true));
         if (checkForUpdates)
             items.append(ui::actionItem(
                     strings::get(updateAvailable ? "update.available" : "update.check"),
@@ -2676,14 +2688,18 @@ void LibraryView::showFolderPicker(const QString &path, bool books, bool downloa
         connect(folderPicker->use, &QPushButton::clicked, this, [this] {
             const auto path = folderPicker->data.path;
             const bool download = folderPicker->property("downloadFolder").toBool();
+            auto chosen = std::exchange(hostFolderChosen, nullptr);
             closeFolderPicker();
-            if (download) {
+            if (chosen) {
+                chosen(path);
+            } else if (download) {
                 if (chooseDownloadFolder)
                     chooseDownloadFolder(path);
             } else if (chooseFolder)
                 chooseFolder(path);
         });
     }
+    hostFolderChosen = nullptr;
     folderPicker->setBookMode(books);
     folderPicker->setDownloadMode(download && !books);
     folderPicker->setGeometry(rect());
@@ -2693,6 +2709,15 @@ void LibraryView::showFolderPicker(const QString &path, bool books, bool downloa
     folderPicker->raise();
     if (browseFolder)
         browseFolder(path);
+}
+
+void LibraryView::showFolderPicker(const QString &path, const QString &title,
+                                   const QString &description,
+                                   std::function<void(const QString &path)> chosen)
+{
+    showFolderPicker(path);
+    folderPicker->setCaptions(title, description);
+    hostFolderChosen = std::move(chosen);
 }
 
 void LibraryView::setFolderPickerLoading(const QString &path)

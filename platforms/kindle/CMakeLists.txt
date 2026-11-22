@@ -62,7 +62,7 @@ list(FILTER shared EXCLUDE REGEX "/src/scenario/")
 list(FILTER shared EXCLUDE REGEX "/src/engine/blaze/")
 file(GLOB_RECURSE engine_adapter CONFIGURE_DEPENDS "${source}/engine/blaze/adapter/*.cpp" "${source}/engine/blaze/adapter/*.h")
 list(APPEND shared ${engine_adapter})
-set(adapters main.cpp window.cpp window.h folder_browser.cpp folder_browser.h folder_picker_checks.cpp updater.cpp updater.h services.cpp services.h display.cpp device.cpp device.h properties.cpp properties.h
+set(adapters main.cpp window.cpp window.h folder_browser.cpp folder_browser.h folder_picker_checks.cpp updater.cpp updater.h sleep_wallpapers.cpp sleep_wallpapers.h services.cpp services.h display.cpp device.cpp device.h properties.cpp properties.h
     ../standalone/reader.cpp ../standalone/reader.h ../standalone/start_screen.cpp ../standalone/start_screen.h)
 list(TRANSFORM adapters PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 qt_add_executable(kobalt_kindle ${shared} ${adapters})
@@ -137,6 +137,16 @@ if(KOBALT_KINDLE_ADAPTER_TESTS OR (KOBALT_KINDLE_NATIVE_TESTING AND BUILD_TESTIN
     target_link_libraries(kindle-device-test PRIVATE Qt6::Gui)
     add_executable(kindle-touch-state ${adapter_exclude} qpa/touch_state_test.cpp)
     target_compile_options(kindle-touch-state PRIVATE -Wall -Wextra -Werror)
+    add_executable(kindle-sleep-wallpapers ${adapter_exclude} sleep_wallpapers_test.cpp
+        sleep_wallpapers.cpp sleep_wallpapers.h "${source}/storage/sleep_snapshot.cpp"
+        "${source}/support/main_thread.cpp" "${source}/support/diagnostics.cpp"
+        "${source}/platform/posix/diagnostics.cpp")
+    target_include_directories(kindle-sleep-wallpapers PRIVATE "${source}" "${CMAKE_CURRENT_BINARY_DIR}")
+    target_compile_options(kindle-sleep-wallpapers PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(kindle-sleep-wallpapers PRIVATE Qt6::Gui Threads::Threads)
+    if(APPLE)
+        target_compile_definitions(kindle-sleep-wallpapers PRIVATE fdatasync=fsync)
+    endif()
     add_executable(kindle-updater ${adapter_exclude} updater_test.cpp updater.cpp updater.h)
     target_include_directories(kindle-updater PRIVATE "${source}" "${CMAKE_CURRENT_BINARY_DIR}")
     target_compile_options(kindle-updater PRIVATE -Wall -Wextra -Werror)
@@ -185,6 +195,8 @@ else()
         add_test(NAME kindle.kpm-hooks COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/kpm/hooks-test.sh"
             "${CMAKE_BINARY_DIR}/test-tmp")
         add_test(NAME kindle.updater COMMAND kindle-updater)
+        add_test(NAME kindle.sleep-wallpapers COMMAND kindle-sleep-wallpapers -platform offscreen)
+        set_tests_properties(kindle.sleep-wallpapers PROPERTIES TIMEOUT 20)
         set_tests_properties(kindle.updater PROPERTIES TIMEOUT 10)
         add_test(NAME kindle.standalone COMMAND "${CMAKE_COMMAND}"
             "-DAPP=$<TARGET_FILE:kobalt_kindle>" "-DROOT=${KOBALT_ROOT}" "-DBUILD=${CMAKE_BINARY_DIR}"

@@ -69,9 +69,13 @@ private:
 };
 } // namespace
 
-ReaderHostServices readerServices(std::shared_ptr<Device> device)
+ReaderHostServices readerServices(std::shared_ptr<Device> device, QStringList wallpaperDirectories)
 {
     ReaderHostServices result;
+    if (!wallpaperDirectories.isEmpty())
+        result.sleepWallpaperHelp =
+                strings::get("sleep.kindle_wallpaper_help").arg(wallpaperDirectories.first());
+    result.sleepWallpaperDirectories = std::move(wallpaperDirectories);
     result.deviceName = QStringLiteral("Kindle");
     result.backButtonLabel = strings::get("library.exit_to_library");
     result.colorDisplay = [] { return qApp && qApp->property("kobalt.colorDisplay").toBool(); };

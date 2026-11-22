@@ -3,6 +3,7 @@
 #include "device.h"
 #include "folder_browser.h"
 #include "updater.h"
+#include "sleep_wallpapers.h"
 #include "pointer_cancellation.h"
 #include "qpa/sleep_frame.h"
 #include "platforms/standalone/canvas.h"
@@ -20,6 +21,8 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QApplication>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QWindow>
 #include <QtMath>
 #include <QPushButton>
@@ -56,7 +59,8 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
       controller(
               paths, std::move(fonts), std::move(placeholder),
               [this, device = device, exports = paths.directory + QStringLiteral("/exports")] {
-                  auto services = readerServices(device);
+                  auto services = readerServices(
+                          device, wallpapers ? wallpapers->directories() : QStringList());
                   if (bottomBand > 0)
                       services.safeArea = [band = bottomBand](QSize) {
                           return SafeArea{ 0, band, 0 };
@@ -145,7 +149,20 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
             });
     connect(start, &standalone::StartScreen::exitRequested, this, &Window::closeBook);
     folderBrowser = new FolderBrowser(folderStorageRoot, this);
+    // The reader's own sleep pictures. A sleep in the Library shows one at random.
+    wallpapers = new SleepWallpapers(
+            QFileInfo(paths.directory).dir().filePath(QStringLiteral("sleep-wallpapers.json")),
+            QDir(folderStorageRoot).filePath(QStringLiteral("kobalt-wallpapers")), this);
+    prepareWallpaper();
     auto *libraryView = start->library();
+    libraryView->chooseSleepWallpapers = [this, folderStorageRoot] {
+        const auto current = wallpapers->folder();
+        start->library()->showFolderPicker(
+                QFileInfo(current).isDir() ? current : folderStorageRoot,
+                strings::get("library.sleep_wallpapers"),
+                strings::get("sleep.kindle_wallpaper_folder_description"),
+                [this](const QString &path) { wallpapers->setFolder(path); });
+    };
     libraryView->browseFolder = [this](const QString &path) {
         const auto *picker = start->library()->findChild<QWidget *>("libraryFolderPicker");
         folderBrowser->navigate(path, picker && picker->property("selectBook").toBool());
@@ -492,7 +509,13 @@ void Window::updateSleepView()
         ::kindle::requestSleepFrame(*windowHandle());
     sleepView->setGeometry(rect());
     const auto &frame = device->sleepFrame();
-    if (frame.isNull()) {
+    // Outside a book, the Library shows one of the reader's wallpapers.
+    if (frame.isNull() && !controller.window() && !wallpapers->image().isNull()) {
+        sleepView->setText({});
+        sleepView->setPixmap(
+                QPixmap::fromImage(wallpapers->image())
+                        .scaled(size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+    } else if (frame.isNull()) {
         sleepView->setPixmap({});
         sleepView->setText(tr("Kobalt\nSleeping"));
     } else {
@@ -502,6 +525,14 @@ void Window::updateSleepView()
     sleepView->show();
     sleepView->raise();
     platform::pageRefresh(this, true);
+}
+
+void Window::prepareWallpaper()
+{
+    const auto *screen = QGuiApplication::primaryScreen();
+    const auto pixels = screen ? screen->size() * screen->devicePixelRatio() : size();
+    wallpapers->prepare(pixels.isEmpty() ? QSize(1072, 1448) : pixels,
+                        !qApp->property("kobalt.colorDisplay").toBool());
 }
 
 void Window::sleepingChanged(bool sleeping)
@@ -527,6 +558,8 @@ void Window::sleepingChanged(bool sleeping)
         if (windowHandle())
             ::kindle::wakeDisplay(*windowHandle());
         sleepView->hide();
+        // Random picks again after each wake, as the reader's Random wallpaper does.
+        prepareWallpaper();
         if (auto *reader = controller.window()) {
             reader->prepareWake();
             reader->wakeReader();
