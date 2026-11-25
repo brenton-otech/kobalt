@@ -428,6 +428,11 @@ void Device::setSleeping(bool sleeping)
     QPointer<Device> guard(this);
     if (state_.sleeping != sleeping) {
         state_.sleeping = sleeping;
+        sleepFrameReported = false;
+        if (sleeping)
+            sleepClock.start();
+        else
+            sleepClock.invalidate();
         emit sleepingChanged(sleeping);
         if (!guard)
             return;
@@ -442,9 +447,24 @@ void Device::setSleepFrame(QImage frame)
     emit sleepFrameChanged();
 }
 
+void Device::sleepFramePresented()
+{
+    if (!state_.sleeping || sleepFrameReported)
+        return;
+    sleepFrameReported = true;
+    qInfo("Kindle power: sleep frame on the panel %lld ms after sleep",
+          sleepClock.isValid() ? static_cast<long long>(sleepClock.elapsed()) : -1LL);
+    if (bridgeReady)
+        bridge.write("p\n");
+}
+
 void Device::powerEvent(const QByteArray &event)
 {
     qInfo().noquote() << "Kindle power:" << event;
+    if (event == "readyToSuspend")
+        qInfo("Kindle power: suspend asked %lld ms after sleep, sleep frame on the panel: %s",
+              sleepClock.isValid() ? static_cast<long long>(sleepClock.elapsed()) : -1LL,
+              sleepFrameReported ? "yes" : "no");
     if (event == "ready") {
         bridgeReady = true;
         bridgeDeadline.stop();

@@ -750,6 +750,10 @@ bool Window::eventFilter(QObject *object, QEvent *event)
         exitFrameReady = true;
         QTimer::singleShot(0, this, &QWidget::close);
     }
+    if (object == windowHandle() && event->type() == QEvent::DynamicPropertyChange
+        && static_cast<QDynamicPropertyChangeEvent *>(event)->propertyName()
+                == "kobalt.sleepPresented")
+        device->sleepFramePresented();
     if (object == qApp && event->type() == QEvent::DynamicPropertyChange
         && static_cast<QDynamicPropertyChangeEvent *>(event)->propertyName()
                 == "kobalt.displayFailure") {

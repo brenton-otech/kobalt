@@ -103,7 +103,12 @@ once. These stock calls are bounded. If a step fails, the supervisor logs it
 and keeps its recovery directory. The reader's exclusive touch grab keeps the
 paused UI from seeing touches; the power button still reaches stock power
 services. The power helper listens through an anonymous LIPC client and leaves
-`com.lab126.kaf` and `frameworkStarted` to the running framework. KOReader's
+`com.lab126.kaf` and `frameworkStarted` to the running framework. Suspend gets one deferral per sleep cycle, which lets the sleep frame finish
+drawing: two seconds once the reader has reported that frame on the panel (the
+helper hears `p` after the refresh completes), six seconds when it has not. An
+interrupted full-screen refresh leaves a washed, blurry picture. The log lines
+`Kindle power: sleep frame on the panel N ms after sleep` and `suspend asked N ms
+after sleep, sleep frame on the panel: yes|no` show which case a sleep was in. KOReader's
 extra service stops (`stored`, `webreader` and the like) are not copied.
 
 Supervisor lines in `kobalt/logs/launcher.log` start with a UTC timestamp,

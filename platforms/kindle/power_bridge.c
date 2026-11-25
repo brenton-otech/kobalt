@@ -137,6 +137,9 @@ int main(void)
     char pending[512];
     size_t used = 0;
     int deferred = 0;
+    /* The reader reports with "p" once its sleep frame is on the panel. A
+     * full-screen refresh outlasts the short default deferral. */
+    int presented = 0;
     while (!stopping && !overflow) {
         if (poll(fds, 2, -1) < 0) {
             if (errno == EINTR)
@@ -153,6 +156,8 @@ int main(void)
             /* Commands carry no user values. Coalesce activity notifications. */
             if (memchr(commands, 'a', (size_t)n))
                 LipcSetIntProperty(handle, "com.lab126.powerd", "touchScreenSaverTimeout", 1);
+            if (memchr(commands, 'p', (size_t)n))
+                presented = 1;
         }
         if (!(fds[0].revents & POLLIN))
             continue;
@@ -168,12 +173,17 @@ int main(void)
             if ((name_length == strlen("goingToScreenSaver")
                  && !memcmp(pending + first, "goingToScreenSaver", name_length))
                 || (name_length == strlen("outOfScreenSaver")
-                    && !memcmp(pending + first, "outOfScreenSaver", name_length)))
+                    && !memcmp(pending + first, "outOfScreenSaver", name_length))) {
                 deferred = 0;
+                presented = 0;
+            }
             if (!deferred && name_length == strlen("readyToSuspend")
                 && !memcmp(pending + first, "readyToSuspend", name_length)) {
                 deferred = 1;
-                LipcSetIntProperty(handle, "com.lab126.powerd", "deferSuspend", 2);
+                /* One bounded deferral per sleep cycle. Without the reader's report the
+                 * sleep frame may still be drawing, so allow it the time to finish. */
+                LipcSetIntProperty(handle, "com.lab126.powerd", "deferSuspend",
+                                   presented ? 2 : 6);
             }
             const size_t length = i - first + 1;
             if (write(STDOUT_FILENO, pending + first, length) != (ssize_t)length) {

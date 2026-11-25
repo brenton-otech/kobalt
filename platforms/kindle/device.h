@@ -43,6 +43,9 @@ public:
     void startLifecycle(const QString &program);
     void activity();
     void setSleepFrame(QImage frame);
+    // The sleep frame's refresh has completed. The power service keeps its
+    // suspend deferral short once this is known.
+    void sleepFramePresented();
 
     const QImage &sleepFrame() const { return sleepFrame_; }
 #ifdef KOBALT_KINDLE_NATIVE_TESTING
@@ -81,7 +84,8 @@ private:
     QProcess bridge;
     QTimer bridgeDeadline;
     QByteArray bridgeOutput;
-    QElapsedTimer lastActivity;
+    QElapsedTimer lastActivity, sleepClock;
+    bool sleepFrameReported = false;
     QImage sleepFrame_;
     bool lifecycle = false, bridgeReady = false, powerKnown = false;
     void powerEvent(const QByteArray &event);

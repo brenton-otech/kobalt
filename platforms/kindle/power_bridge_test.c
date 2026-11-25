@@ -27,10 +27,14 @@ static void *events(void *unused)
         return NULL;
     const char *sequence[] = { "goingToScreenSaver", "readyToSuspend",     "readyToSuspend",
                                "outOfScreenSaver",   "goingToScreenSaver", "readyToSuspend" };
-    for (unsigned i = 0; i < sizeof(sequence) / sizeof(sequence[0]); ++i)
+    for (unsigned i = 0; i < sizeof(sequence) / sizeof(sequence[0]); ++i) {
+        // The reader reports its sleep frame between the second sleep and its suspend.
+        if (i == 5 && getenv("FAKE_PAUSE_BEFORE_LAST_SUSPEND"))
+            usleep(400000);
         for (unsigned j = 0; j < 6; ++j)
             if (!strcmp(sequence[i], bindings[j].name))
                 bindings[j].callback((void *)1, sequence[i], NULL, bindings[j].data);
+    }
     return NULL;
 }
 

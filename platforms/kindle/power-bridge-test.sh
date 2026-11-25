@@ -12,12 +12,15 @@ cc -std=c11 -Wall -Wextra -Werror -shared -fPIC "$source_dir/power_bridge_test.c
 export LD_LIBRARY_PATH="$scratch"
 # The paused stock UI owns com.lab126.kaf. The bridge listens without
 # claiming that name or publishing the framework's state.
-{ sleep 0.2; } | timeout --kill-after=1s 3s env FAKE_DUPLICATE=1 "$scratch/bridge" >"$scratch/output" 2>"$scratch/errors"
+# The first sleep never reports its frame, so it gets the long deferral. The
+# second reports "p" before its suspend and gets the short one.
+{ sleep 0.2; printf 'p\n'; sleep 0.6; } | timeout --kill-after=1s 3s env FAKE_DUPLICATE=1 FAKE_PAUSE_BEFORE_LAST_SUSPEND=1 "$scratch/bridge" >"$scratch/output" 2>"$scratch/errors"
 grep -q '^anonymous-client$' "$scratch/errors"
 if grep -q '^registered:' "$scratch/errors"; then
     echo 'Power bridge published framework state over the live framework.' >&2; exit 1
 fi
-[[ $(grep -c '^defer:2$' "$scratch/errors") == 2 ]] || { cat "$scratch/errors" >&2; echo 'Suspend deferral repeated within one sleep cycle.' >&2; exit 1; }
+[[ $(grep -c '^defer:' "$scratch/errors") == 2 ]] || { cat "$scratch/errors" >&2; echo 'Suspend deferral repeated within one sleep cycle.' >&2; exit 1; }
+[[ $(grep -c '^defer:6$' "$scratch/errors") == 1 && $(grep -c '^defer:2$' "$scratch/errors") == 1 ]] || { cat "$scratch/errors" >&2; echo 'Suspend deferral ignored whether the sleep frame was on the panel.' >&2; exit 1; }
 [[ $(grep -c '^readyToSuspend$' "$scratch/output") == 3 ]]
 grep -q '^ready$' "$scratch/output"
 grep -q '^closed$' "$scratch/errors"

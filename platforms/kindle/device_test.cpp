@@ -288,6 +288,34 @@ printf '%s\n' "$5" > "$root/$4"
     qunsetenv("KOBALT_KINDLE_USB_NETWORK");
     device->stop();
     device.reset();
+    // The completed sleep frame reaches the power service once per sleep, and
+    // never while awake.
+    const QString reports = root + "/bridge-commands";
+    write(root + "/bridge",
+          "#!/bin/sh\nprintf 'ready\\n'\nwhile IFS= read -r line; do printf '%s\\n' \"$line\" >> '"
+                  + reports.toUtf8() + "'; done\n",
+          true);
+    device = std::make_shared<Device>(commands);
+    device->startLifecycle(root + "/bridge");
+    check(waitForDevice([&] { return device->initialized() && device->state().sleeping; }),
+          "Sleeping bridge fixture did not initialize");
+    device->sleepFramePresented();
+    device->sleepFramePresented();
+    const auto reported = [&] {
+        QFile file(reports);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    // The service may also hear an "a" for activity; only the "p" reports count.
+    check(waitForDevice([&] { return reported().count("p\n") == 1; }),
+          "The presented sleep frame was not reported exactly once");
+    device->simulatePowerEvent("outOfScreenSaver");
+    device->sleepFramePresented();
+    QThread::msleep(100);
+    QCoreApplication::processEvents();
+    check(reported().count("p\n") == 1,
+          "A frame presented while awake was reported as a sleep frame");
+    device->stop();
+    device.reset();
     std::puts(
             "Kindle device parsing, bounded IPC, light readback, commit, cancellation and airplane mode passed.");
     return 0;
