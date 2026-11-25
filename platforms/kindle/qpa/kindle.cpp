@@ -2,7 +2,9 @@
 #include "pointer_delivery.h"
 #include "sleep_frame.h"
 #include "mtk_display.h"
+#include <QDateTime>
 #include <QHash>
+#include <QThreadPool>
 #include <QDebug>
 #include <QPointer>
 #include <memory>
@@ -120,7 +122,24 @@ public:
             submitted.remove(serial);
             return false;
         }
+        if (generation)
+            dumpSleepFrame();
         return true;
+    }
+
+    // Opt-in diagnostics. With the file kobalt/data/dump-sleep-frame present, keep
+    // the exact picture sent to the panel for each sleep as kobalt/logs/sleep-frame-N.png.
+    // The write runs on a worker, so a slow card never holds the reader.
+    void dumpSleepFrame() const
+    {
+        const auto home = qEnvironmentVariable("KOBALT_KINDLE_HOME");
+        if (home.isEmpty() || !QFile::exists(home + QStringLiteral("/data/dump-sleep-frame")))
+            return;
+        const auto path = QStringLiteral("%1/logs/sleep-frame-%2.png")
+                                  .arg(home)
+                                  .arg(QDateTime::currentSecsSinceEpoch());
+        qInfo("kindle: keeping the sleep frame as %s", qPrintable(path));
+        QThreadPool::globalInstance()->start([image = frame, path] { image.save(path, "PNG"); });
     }
 
     QImage frame;

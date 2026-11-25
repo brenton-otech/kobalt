@@ -510,18 +510,27 @@ void Window::updateSleepView()
         ::kindle::requestSleepFrame(*windowHandle());
     sleepView->setGeometry(rect());
     const auto &frame = device->sleepFrame();
+    // A picture of another size is resampled, which softens it. Log the sizes so
+    // a soft sleep screen can be told from a soft refresh.
+    const auto show = [this](const char *what, const QImage &image, Qt::AspectRatioMode mode) {
+        const bool scaled = image.size() != size();
+        qInfo("kindle: sleep view %s %dx%d in a %dx%d window, pixel ratio %g, resampled: %s", what,
+              image.width(), image.height(), width(), height(), devicePixelRatioF(),
+              scaled ? "yes" : "no");
+        const auto pixmap = QPixmap::fromImage(image);
+        sleepView->setPixmap(scaled ? pixmap.scaled(size(), mode, Qt::SmoothTransformation)
+                                    : pixmap);
+    };
     // Outside a book, the Library shows one of the reader's wallpapers.
     if (frame.isNull() && !controller.window() && !wallpapers->image().isNull()) {
         sleepView->setText({});
-        sleepView->setPixmap(
-                QPixmap::fromImage(wallpapers->image())
-                        .scaled(size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+        show("wallpaper", wallpapers->image(), Qt::KeepAspectRatioByExpanding);
     } else if (frame.isNull()) {
+        qInfo("kindle: sleep view has no picture yet; showing the sleeping text");
         sleepView->setPixmap({});
         sleepView->setText(tr("Kobalt\nSleeping"));
     } else {
-        sleepView->setPixmap(QPixmap::fromImage(frame).scaled(size(), Qt::KeepAspectRatio,
-                                                              Qt::SmoothTransformation));
+        show("reader frame", frame, Qt::KeepAspectRatio);
     }
     sleepView->show();
     sleepView->raise();
