@@ -1,6 +1,6 @@
 # Sync server plan
 
-This is a design proposal for a self-hosted Kobalt server on one small VPS. With one login per user, it would serve the user's books, settings and reading positions to every Kobalt device. Nothing here is implemented yet. Facts about Kobalt cite the file that shows them. Facts about other projects and the outside world give a source and the date they were checked, listed in [Sources](#sources).
+This is a design proposal for a self-hosted Kobalt server on one small VPS. With one login per user, it would serve the user's books, settings and reading positions to every Kobalt device. It targets the owner's personal Kindle devices, a Paperwhite 3 and a Colorsoft, and the server is public on the internet. Kobo, Android and desktop are out of scope for now, and the design does not rule them out. Nothing here is implemented yet. Facts about Kobalt cite the file that shows them. Facts about other projects and the outside world give a source and the date they were checked, listed in [Sources](#sources).
 
 ## Summary
 
@@ -15,16 +15,14 @@ This is a design proposal for a self-hosted Kobalt server on one small VPS. With
 | Area | Current behavior | Where it is |
 | --- | --- | --- |
 | KOSync sign-in | Sends `x-auth-user` and `x-auth-key`, where the key is the MD5 hex digest of the password | `src/sync/kosync.cpp` (`Client::login` and `sendRequest`), [Sync data](sync-data.md#kosync-a-separate-sync-mechanism) |
-| KOSync account storage | `kosync.json` keeps the server URL, username, the MD5 key, a device ID and sync preferences. Writes are atomic and owner-only where the file system allows. On Kobo's FAT storage it stays readable over USB. | [Sync and Android storage](storage/sync-and-android.md#kosync-account) |
+| KOSync account storage | `kosync.json` keeps the server URL, username, the MD5 key, a device ID and sync preferences. Writes are atomic and owner-only where the file system allows. On Kindle storage it stays readable over USB. | [Sync and Android storage](storage/sync-and-android.md#kosync-account) |
 | KOSync requests | Redirects are not followed, TLS verification stays on, each attempt has a ten-second deadline and the URL may have a path prefix | `src/sync/kosync.cpp`, [Progress sync](reader/sync.md#network-connections-and-errors), [KOSync validation](validation/kosync.md) |
 | What a position is | A CREngine XPointer, a percentage from 0 to 1, a device name and a device ID. The document key is KOReader's partial-file MD5 or the MD5 of the file name. | `src/sync/kosync.h` (`documentDigest`, `filenameDigest`, `Progress`) |
 | Conflicts | The client reads the server position before it uploads. A different remote position is never overwritten until the user chooses. | `Reconciler` in `src/sync/kosync.h`, [Choosing a synced position](reader/sync.md#choosing-a-synced-position) |
-| Network on Kobo | Connections go through Nickel's Wi-Fi workflow | `platforms/kobo/common/native_sync_network.*`, `src/platform/api/sync_network.h` |
 | OPDS catalog | Only the Kindle host connects it. It parses OPDS 1 Atom feeds, refuses DOCTYPE, sends HTTP Basic credentials only to the catalog's own scheme, host and port, and downloads one EPUB at a time. | `src/opds/feed.h` (`sameServer`), `src/opds/client.cpp`, [Kindle catalog](kindle-maintenance.md#catalog) |
 | OPDS account storage | `opds.json` keeps `url`, `username`, `password` and `folder`, with the password in plain text | `src/opds/browser.h`, [Kindle catalog](kindle-maintenance.md#catalog) |
 | OPDS download | The whole book is held in memory, up to 200 MB, before a worker thread writes it. A book is recognized by its `Author - Title.epub` file name, because a catalog gives no checksum. | `maxDownloadBytes` and `readAll` in `src/opds/client.cpp` |
 | Kindle TLS | The package ships its own `libssl.so.3`, `libcrypto.so.3` (OpenSSL 3.5.9) and Qt's OpenSSL TLS plugin. No CA bundle is packaged, so trust depends on what the firmware provides. | `platforms/kindle/package.cmake`, [PW3 SDK](pw3-sdk.md#build-contract) |
-| Kobo store books | Books that came through Nickel's sync, such as a Kobo-protocol server, use Nickel's position sync and are excluded from KOSync | [Sync data](sync-data.md#books-that-nickels-sync-carries) |
 | Saved-data rules | Formats have their own versions, optional fields keep the version, and damaged data is never overwritten | [Storage compatibility](storage.md#rules) |
 
 Two of these need attention regardless of the server:
@@ -38,7 +36,7 @@ Goals:
 
 - One login per user covers books, settings and reading positions.
 - The owner creates and removes users. There is no public registration.
-- Kobo, Kindle PW3, PW5 and Colorsoft, Android and desktop Kobalt can all reach the server over HTTPS.
+- Kobalt on the Kindle PW3 and Colorsoft (the PW5 build shares the code) can reach the server over HTTPS.
 - A lost device can be cut off without changing the account password.
 - One person can install, update, back up and restore the server in under an hour of routine work a month.
 - Existing KOSync users and KOReader keep working.
@@ -50,7 +48,7 @@ Non-goals for the first phases:
 - Format conversion such as EPUB to KEPUB, and metadata scraping from the internet.
 - High availability. One VPS with tested backups is enough.
 - Annotations, reading history and statistics sync. These come in phase 5.
-- Kobo's store sync protocol. See [Open questions](#open-questions-for-the-owner).
+- Support for Kobo, Android or desktop devices. The protocols stay standard, so they can be added later. Kobo's store sync protocol is not planned.
 
 ## Threat model
 
@@ -75,7 +73,7 @@ Out of scope, stated so the owner can decide otherwise:
 ## Recommended architecture
 
 ```text
- Kobalt (Kobo, Kindle, Android, desktop)        Browser (upload, devices)
+ Kobalt (Kindle PW3, Colorsoft)                 Browser (upload, devices)
  KOReader                                        |
         |  HTTPS, TLS 1.2 or 1.3                 |
         v                                        v
@@ -193,11 +191,8 @@ What must be backed up:
 | Device | TLS library | Expected versions | Trust store | Status |
 | --- | --- | --- | --- | --- |
 | Kindle PW3, PW5, Colorsoft | Kobalt's own OpenSSL 3.5.9 with Qt's OpenSSL plugin | TLS 1.2 and 1.3 | Whatever certificate folders on the firmware Qt finds. Kobalt packages no CA bundle. | Not verified on a device. Whether firmware 5.13.5 trusts ISRG Root X1 is unknown. |
-| Kobo, firmware 4.x (Qt 5) | Nickel's Qt 5 and its OpenSSL | Probably TLS 1.2 | Nickel's | Not verified. A forum report says some older firmware negotiated only TLS 1.0 or 1.1 with a test site. |
-| Kobo, firmware 5 and 6 (Qt 6) | Nickel's Qt 6 and its OpenSSL | TLS 1.2 or 1.3 | Nickel's | Not verified |
-| Android | Kobalt's OpenSSL build for Android | TLS 1.2 and 1.3 | Android system store | Not verified against this server |
 
-- Do not enable TLS 1.0 or 1.1 on the server for any device. If a Kobo 4.x device cannot do TLS 1.2, that device stays on a local network or VPN instead.
+- Do not enable TLS 1.0 or 1.1 on the server for any device. If a Kindle cannot validate the server's certificate, the fix is on the device side, for example a CA bundle packaged with Kobalt, and never a weaker server.
 - Phase 0 must test every device type against a staging host with a real Let's Encrypt certificate. On Kindle, the existing `device_info` report already records the TLS backend and library version (`platforms/kindle/device_info.cpp`).
 - If the Kindle firmware lacks ISRG Root X1, the fix belongs in kobuild: ship a pinned CA bundle with the OpenSSL that kobuild already prepares, and point Qt at it. This follows the rule that TLS and SDK production belong to kobuild ([Kindle building](kindle-maintenance.md#building)). It is not an application-side workaround.
 - A device with a wrong clock fails certificate checks. Kobalt's TLS error message already asks the user to check the device date ([KOSync validation](validation/kosync.md)).
@@ -420,7 +415,7 @@ The native position API adds what KOSync lacks: versions, bulk reads and a confl
 
   ```json
   { "document": "5e8f...", "version": 42, "progress": "/body/DocFragment[12]/body/div/p[7]/text().0",
-    "percentage": 0.4731, "device": "Kobo Libra Colour (Kobalt)", "device_id": "1f0c...",
+    "percentage": 0.4731, "device": "Kindle Paperwhite 3 (Kobalt)", "device_id": "1f0c...",
     "updated": "2026-11-24T21:14:03Z", "client_time": "2026-11-24T21:13:58Z" }
   ```
 
@@ -500,7 +495,7 @@ Positions:
 - Order comes from the server's version counter, which increases with every accepted write. Device clocks are never used for ordering, because e-readers with a flat RTC battery or no network time often have wrong clocks. The device's own time is stored as `client_time` and shown only as information.
 - KOSync writes have no version precondition, as in the reference protocol. They are accepted as the newest write. Kobalt's existing read-before-write rule makes this safe enough for Kobalt; KOReader behaves as it does with any KOSync server.
 - Native writes carry `If-Match`. Two devices that read the same book offline both upload when they reconnect. The first wins. The second gets 412 with the first's position and asks the user, exactly as today's Reconciler does after a read.
-- Every replaced position goes into `position_history`, so a later version of the web page or the reader can offer "go back to where I was on the Kobo yesterday".
+- Every replaced position goes into `position_history`, so a later version of the web page or the reader can offer "go back to where I was on the Colorsoft yesterday".
 
 Settings:
 
@@ -567,7 +562,7 @@ The current Catalog download holds a whole book in memory. Bulk sync replaces th
 5. Check the SHA-256 against the change feed, then rename the file into place. A mismatch deletes the `.part` file and reports the book.
 6. Before each book, check free space with `QStorageInfo`. Keep a reserve of 200 MB or 10 percent of the volume, whichever is larger. Stop with a clear message when space runs out.
 7. Run only when the user starts it from the Library, or automatically only when Wi-Fi is already connected and no book is open. Pause when a book opens, because downloads compete for the CPU and storage that a page turn needs. Resume when the reader closes.
-8. Never turn Wi-Fi on for a bulk sync. On Kindle, respect the Wi-Fi switch and Airplane mode as KOSync does ([KOSync and Wi-Fi](kindle-maintenance.md#kosync-and-wi-fi)). On Kobo, use `SyncNetwork::prepare` only with `interactive` true for a sync the user started, and release the connection afterwards.
+8. Never turn Wi-Fi on for a bulk sync. On Kindle, respect the Wi-Fi switch and Airplane mode as KOSync does ([KOSync and Wi-Fi](kindle-maintenance.md#kosync-and-wi-fi)).
 9. Write the local record of which books came from the server in one batch per downloaded book, on the worker thread, not per chunk.
 
 Each platform needs its own last step:
@@ -575,11 +570,9 @@ Each platform needs its own last step:
 | Platform | Where books go | Open issue |
 | --- | --- | --- |
 | Kindle | The Catalog's chosen download folder, which becomes a Library folder | None beyond device testing |
-| Android | A Library folder the user grants through the system's folder picker | Uses the same storage access path as today's Library folders |
 | Desktop | A chosen Library folder | None |
-| Kobo | The Kobo's user storage, where Nickel must import the file | Kobalt on Kobo uses Nickel's library. A downloaded file appears only after Nickel imports it, and how to trigger that safely is not established. See [Open questions](#open-questions-for-the-owner). |
 
-Storage IO on Kobo and Kindle is expensive. Measure a bulk sync of 100 books on the slowest device and storage, and check page-turn latency while a sync runs in another state, before turning on any automatic sync.
+Storage IO on a Kindle is expensive. Measure a bulk sync of 100 books on the slowest device and storage, and check page-turn latency while a sync runs in another state, before turning on any automatic sync.
 
 ### Existing KOSync users
 
@@ -591,7 +584,7 @@ Storage IO on Kobo and Kindle is expensive. Measure a bulk sync of 100 books on 
 
 - From phase 1, users put a device secret, not their password, into the Catalog account. The Catalog help text and [Kindle catalog](kindle-maintenance.md#catalog) should say so once the server exists.
 - From phase 3, a Catalog address that points at a Kobalt server uses the server account instead, and `opds.json` keeps no password for it. Other OPDS catalogs keep working as today.
-- Kobo and Kindle user storage is readable over USB and has no key store, so encrypting the secret on the device would only hide the key next to it. A scoped, revocable secret is the honest protection. Android can keep the secret in app-private storage.
+- Kindle user storage is readable over USB and has no key store, so encrypting the secret on the device would only hide the key next to it. A scoped, revocable secret is the honest protection.
 
 ## Deployment and operations
 
@@ -721,11 +714,11 @@ Each phase ends with something usable.
 
 | Phase | Scope | Done means | Tests |
 | --- | --- | --- | --- |
-| 0. Groundwork | Server repository, CI, staging host with a real certificate. A TLS probe of every device type. Memory measurement. Answers to the open questions. | Each device type has either reached the staging host over HTTPS or has a recorded fix, such as a kobuild CA bundle | A device test log per device type; `testssl.sh` report for the staging host |
+| 0. Groundwork | Server repository, CI, staging host with a real certificate. A TLS probe from the PW3 and the Colorsoft. Memory measurement. Answers to the open questions. | Each device type has either reached the staging host over HTTPS or has a recorded fix, such as a kobuild CA bundle | A device test log per device type; `testssl.sh` report for the staging host |
 | 1. Accounts, books and OPDS | User command line, setup links, web sign-in, upload page, devices page, device secrets, OPDS feeds and downloads, backups | A user uploads a book on the web, a Kindle PW3 downloads it through Kobalt's existing Catalog with a device secret, and a restore drill passes | Upload validation fuzzing, cross-user tests, Basic auth tests, OPDS parsing by Kobalt's `model.opds-feed` parser against server output, restore drill |
-| 2. Positions | KOSync-compatible routes, native position API, position history | Kobalt on Kobo, Kindle and Android and KOReader exchange positions through `/kosync` with device secrets, with no Kobalt change | KOSync conformance suite, Kobalt's `model.kosync` and `lifecycle.kosyncFinal` server rows against this server, version and 412 tests |
+| 2. Positions | KOSync-compatible routes, native position API, position history | Kobalt on the Kindle devices and KOReader exchange positions through `/kosync` with device secrets, with no Kobalt change | KOSync conformance suite, Kobalt's `model.kosync` and `lifecycle.kosyncFinal` server rows against this server, version and 412 tests |
 | 3. Server account and settings in Kobalt | `server.json`, device enrollment and pairing, native positions in the client, settings sync with the key allowlist, Catalog using the server account | A setting changed on one device appears on another at its next sync, a device-local setting does not, and no password is stored on any device | New model tests for settings merge and conflict, storage compatibility tests for `server.json`, strict main-thread runs, Kobo syntax check, screen review of the new Sync page section |
-| 4. Bulk library sync | Change feed client, streaming resumable downloads, free-space checks, Library entry point | A new Kindle PW3 gets a 100-book library unattended, survives Wi-Fi loss and a reboot mid-download, and page turns stay within the resource gate while a sync is paused | Download resume and hash tests against a local server, low-space tests, a device run on PW3 and on the slowest Kobo storage, release evaluation resource scenarios |
+| 4. Bulk library sync | Change feed client, streaming resumable downloads, free-space checks, Library entry point | A new Kindle PW3 gets a 100-book library unattended, survives Wi-Fi loss and a reboot mid-download, and page turns stay within the resource gate while a sync is paused | Download resume and hash tests against a local server, low-space tests, a device run on the PW3, the slower of the two Kindles, release evaluation resource scenarios |
 | 5. Annotations and history | Bookmarks, highlights, notes and reading sessions per book, with per-item merge | Highlights made on two devices both appear on both | Merge tests with the annotation limits in [Annotations and words](storage/annotations.md#limits), migration tests |
 
 Phase 5 needs its own design. Annotations have revisions per list, limits and CREngine XPointer positions that differ between engines and layouts ([Annotations and words](storage/annotations.md)), and merging them is harder than last-writer-wins.
@@ -747,7 +740,7 @@ In Kobalt:
 - Model tests for the new client against a local server binary, with an optional runner like `tests/support/run-kosync-server.sh`. The ordinary native suite stays offline.
 - Storage compatibility tests for `server.json` and the new `profile_state` record, including damaged and newer files.
 - Strict main-thread runs for every new path, and the source checks in `platforms/checks/`.
-- Device checks on PW3, a Kobo with firmware 4.x and one with 5.x or 6.x, because native checks do not establish TLS or Wi-Fi behavior on a device.
+- Device checks on the PW3 and the Colorsoft, because native checks do not establish TLS or Wi-Fi behavior on a device.
 
 Before opening the server to other users:
 
@@ -760,8 +753,7 @@ Before opening the server to other users:
 | Risk | Effect | Mitigation |
 | --- | --- | --- |
 | Kindle firmware lacks a CA that Let's Encrypt chains to | Kindle cannot connect | Test in phase 0. Ship a CA bundle through kobuild if needed. |
-| Kobo 4.x cannot negotiate TLS 1.2 | Old Kobos cannot connect | Test in phase 0. Those devices use a local network or VPN. |
-| Importing downloaded books into Nickel is not safe or reliable | No bulk sync on Kobo | Keep Kobo on manual copies or a Kobo-protocol server until solved |
+| A Kindle does not trust the server's certificate chain | Kobalt cannot connect at all | Test in phase 0 before any server code. Package a CA bundle with Kobalt, or serve a chain the firmware trusts. |
 | Custom server code has a security bug | Data exposure | Small code base, cross-user tests, fuzzing, external scan, no rendering of user content |
 | The owner stops maintaining the server | Unpatched internet-facing service | A single binary with few dependencies. The data is plain SQLite and files, and books can always be downloaded. |
 | A one-person VPS fails at a bad time | Hours without sync | Devices keep working offline. Positions and settings are local first. |
@@ -769,19 +761,24 @@ Before opening the server to other users:
 | A settings key changes meaning in a future Kobalt release | A synced value breaks an older device | Kobalt already uses defaults for invalid values. A key whose meaning changes gets a new name, per [Storage compatibility](storage.md#rules). |
 | Bulk sync slows reading on slow devices | Page-turn latency | Pause while a book is open and measure with the resource gate |
 
+## Decisions so far
+
+- The server is public on the internet, with the hardening in this plan and the admin command line reachable only over SSH. A VPN-only server is not wanted. E-readers cannot run a VPN client, so it would limit syncing to home.
+- The devices are the owner's personal Kindles, a PW3 and a Colorsoft. Kobo is not a goal.
+- The Kindle client work may live in a separate fork named "kibalt", which is not decided. See the first open question below.
+
 ## Open questions for the owner
 
-1. How many users, and how large is the combined library in GB? This sets disk size, upload limits and whether object storage is needed soon.
-2. Should the server be public, or reachable only over WireGuard or Tailscale? E-readers cannot run a VPN client, so a VPN-only server means syncing only at home or through a home router that joins the VPN. The recommendation is public with the hardening above, and the admin command line reachable only over SSH.
+1. Should the Kindle client changes live on the `kindle` branch of Kobalt, or in a separate fork? A fork frees the project from Kobo, Android and desktop rules and builds, but the owner then merges each upstream release alone. Only phase 3 onward touches the client, so this can wait until phases 0 to 2 are done.
+2. How many users, and how large is the combined library in GB? This sets disk size, upload limits and whether object storage is needed soon.
 3. How long can a device be offline and still be trusted? This sets the unused-credential expiry, proposed at 365 days.
 4. Should a settings conflict keep the server value silently, as proposed, or ask on the device?
 5. Which settings should sync? Review the proposed allowlist.
 6. Is there an existing Calibre library to import? If so, a one-time `kobalt-server import --calibre <folder>` that reads `metadata.db` read-only and copies EPUBs is a contained addition to phase 1.
 7. Is a web page needed beyond upload, devices and account deletion? Every page is attack surface. A command-line upload tool is an alternative.
 8. Which formats besides EPUB, if any? Each needs its own validation.
-9. On Kobo, should books come through Kobalt's own downloads (which needs a safe Nickel import) or through a server that speaks Kobo's store sync, such as Calibre-Web, Grimmory or Komga? The second means those books use Nickel's position sync, not Kobalt's ([Sync data](sync-data.md#books-that-nickels-sync-carries)).
-10. Which domain and which off-site backup target? A second machine with restic's REST server, or an S3 bucket with object lock?
-11. Should the server code be open source, and under which license? This plan reuses no AGPL code, so the choice is open.
+9. Which domain and which off-site backup target? A second machine with restic's REST server, or an S3 bucket with object lock?
+10. Should the server code be open source, and under which license? This plan reuses no AGPL code, so the choice is open.
 
 ## Effort estimate
 
@@ -793,17 +790,17 @@ For one part-time developer, about 10 to 15 hours a week, with the server and th
 | 1. Accounts, books and OPDS | 4 to 5 weeks | None | 4 to 5 weeks |
 | 2. Positions | 2 weeks | None, plus test runs | 2 to 3 weeks |
 | 3. Server account and settings | 1 week | 4 to 5 weeks, including screen review | 5 to 6 weeks |
-| 4. Bulk library sync | 1 week | 5 to 7 weeks, longer if Kobo import is in scope | 6 to 8 weeks |
+| 4. Bulk library sync | 1 week | 4 to 6 weeks | 5 to 7 weeks |
 | 5. Annotations and history | 3 weeks | 6 or more weeks | 9 or more weeks |
 
-These are rough. Device testing on Kindle and Kobo is usually where estimates slip.
+These are rough. Device testing on the Kindles is usually where estimates slip.
 
 ## Recommended next step
 
 Start phase 0 with two small, independent tasks:
 
-1. Put a static test page behind Caddy with a real Let's Encrypt certificate on a staging host name. Point Kobalt's KOSync sign-in at it from a Kindle PW3, a Kobo on firmware 4.x, a Kobo on 5.x or 6.x and Android. Record which devices complete the TLS handshake. This answers the biggest unknown before any server code exists.
-2. Answer open questions 1, 2, 9 and 10. They decide disk size, exposure, the Kobo approach and the backup target.
+1. Put a static test page behind Caddy with a real Let's Encrypt certificate on a staging host name. Point Kobalt's KOSync sign-in at it from the Kindle PW3 and the Colorsoft. Record whether each completes the TLS handshake. This answers the biggest unknown before any server code exists.
+2. Answer open questions 2 and 9. They decide disk size and the backup target.
 
 Then create the server repository with the skeleton, CI, `govulncheck`, the KOSync conformance suite and the shared MD5 test vectors, and begin phase 1.
 
@@ -837,14 +834,11 @@ All checked on 2026-11-25.
 | Rate limiting is a separate Caddy module | [mholt/caddy-ratelimit](https://www.github.com/mholt/caddy-ratelimit) |
 | Let's Encrypt Generation Y, cross-signs, lifetime schedule | [Upcoming changes to Let's Encrypt certificates](https://community.letsencrypt.org/t/upcoming-changes-to-let-s-encrypt-certificates/243873), [Help Net Security on 64-day lifetimes](https://www.helpnetsecurity.com/2026/10/12/lets-encrypt-64-day-certificate-lifetime/) |
 | OPDS 1.2 feeds, acquisition relations, pagination, search, Basic authentication | [OPDS 1.2 specification](https://specs.opds.io/opds-1.2) |
-| Older Kobo firmware negotiating TLS 1.0 or 1.1, anecdotal | [MobileRead post](https://www.mobileread.com/forums/showthread.php?p=4317629) |
 
 Not verified, and to be checked before relying on them:
 
 - Which root certificates Kindle firmware 5.13.5 and the Colorsoft firmware provide, and which folders Qt's OpenSSL backend searches on those devices.
-- The OpenSSL versions and TLS versions in Nickel on firmware 4.x, 5.x and 6.x.
 - The real memory use of the proposed Go server, and argon2id timing on the chosen VPS.
 - The exact response bodies of the reference KOSync server for every route; copy them from its source when implementing.
 - Whether korrosync can disable registration, and how Calibre-Web Automated scopes KOSync credentials.
 - Maintenance activity of kosync-dotnet, Calibre-Web and Kavita; their release pages showed no dates in the captures read.
-- How Nickel can be asked to import a downloaded book safely.
