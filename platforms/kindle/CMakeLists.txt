@@ -101,7 +101,8 @@ endif()
 target_link_libraries(kobalt_kindle PRIVATE Qt6::Widgets Qt6::Network Qt6::Sensors Qt6::Sql "${engine}"
     "${prefix}/lib/libharfbuzz.a" "${prefix}/lib/libxxhash.a" "${prefix}/lib/libutf8proc.a"
     "${prefix}/lib/libjpeg.a" "${prefix}/lib/liblunasvg.a" "${prefix}/lib/libfreetype.a"
-    "${prefix}/lib/libfribidi.a" "${prefix}/lib/libunibreak.a" "${KOBALT_TEST_PNG}" ZLIB::ZLIB)
+    "${prefix}/lib/libbrotlidec.a" "${prefix}/lib/libbrotlicommon.a" "${prefix}/lib/libwebpdemux.a"
+    "${prefix}/lib/libwebpdecoder.a" "${prefix}/lib/libfribidi.a" "${prefix}/lib/libunibreak.a" "${KOBALT_TEST_PNG}" ZLIB::ZLIB)
 if(UNIX AND NOT APPLE)
     target_link_libraries(kobalt_kindle PRIVATE dl pthread rt)
     set_target_properties(kobalt_kindle PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")

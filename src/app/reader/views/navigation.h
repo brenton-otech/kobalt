@@ -67,9 +67,9 @@ struct NavigationState
     bool hideTabLabels = false;
     bool navigateEnabled = true, statsEnabled = true;
     // Zen mode keeps Chapters, Search, Annotate and Bookmarks in centered
-    // groups. Annotate and Bookmarks follow their hidden-feature choices.
+    // groups. Quick annotation mode hides the Annotate toggle.
     bool zen = false;
-    bool annotationsEnabled = true, bookmarksEnabled = true;
+    bool showAnnotate = true, bookmarksEnabled = true;
     bool annotating = false, bookmarksOpen = false;
     // Zen mode's reading stats under the top group. Negative chapter minutes
     // mean no estimate yet. An approximate estimate shows "≈".
@@ -150,6 +150,8 @@ public:
 
     void setStatusVisible(bool visible) { statusVisible = visible; }
 
+    void updateBatteryVisibility();
+
     void setTextFace(const QString &face) { bar->setTextFace(face); }
 
     // A camera band at the top holds the status line when it is tall enough.
@@ -164,10 +166,10 @@ public:
     // row, between the exit action and the actions on the right.
     void setInlineStatus(bool value) { inlineStatus = value; }
 
-    int statusHeight() const
+    int statusHeight(bool includeZenGroup = true) const
     {
         // Zen mode's top group always keeps the status line above its cells.
-        const int status = statusVisible && (!inlineStatus || zenTop)
+        const int status = statusVisible && (!inlineStatus || (includeZenGroup && zenTop))
                 ? int(ui::metrics::chrome::statusHeight)
                 : 0;
         return safeTop >= status ? safeTop : safeTop + status;
@@ -201,7 +203,7 @@ public:
     bool contains(QPoint global) const;
 
 private:
-    void placeToolbar(QSize size, const QVector<QWidget *> &actions, bool zen);
+    void placeToolbar(QSize size, const QVector<QWidget *> &actions);
     void placeZenToolbar(QSize size, const QVector<QWidget *> &actions,
                          const NavigationState &state);
     ui::PageScrubber *scrubber = nullptr;

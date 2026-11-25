@@ -1,15 +1,16 @@
 # Unofficial Kindle builds
 
-The current Kindle port tracks the upstream `v1.0-beta.9` release tag,
-commit `be47258850ffdc3295257475afdf8b8f6cb53176`. One branch builds the PW3,
+The current Kindle port tracks the upstream `v1.0-beta.10` release tag,
+commit `1796a32559dbb2912bd565990d1c7a0ca7ac4e52`. One branch builds the PW3,
 PW5 and Colorsoft targets from one `platforms/kindle/` implementation: it
-merges that tag into the beta.8 Colorsoft port (`28c4b4eb`) and then merges the
-PW3 branch, `platform/kindle-pw3`, which had moved to the same tag. Both
-branches deliver this history by fast-forward. Target-specific parts stay per
+merges that tag into the unified beta.9 port with the OPDS catalog, the Wi-Fi
+switch, sleep wallpapers and the Library additions (`094cad7e`), which had merged
+the beta.8 Colorsoft port (`28c4b4eb`) and the PW3 branch, `platform/kindle-pw3`.
+Target-specific parts stay per
 target: the SDK image and toolchain, the firmware fixture, the framebuffer
 path, and packaging, which is a KUAL ZIP for every target plus a KPM package
 for the Colorsoft. Build metadata records the exact upstream revision and the
-upstream asset version, currently beta.9.
+upstream asset version, currently beta.10.
 
 The original port starts at Nico Verbruggen's `v1.0-beta.7` tag, commit
 `e86533c80e8aa41bfc7d79c9e445cbd4a6405039`. The original Kindle implementation

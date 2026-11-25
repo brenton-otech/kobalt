@@ -47,7 +47,8 @@ public:
 
     bool supportsSleepScreen() const override { return true; }
 
-    bool presentSleepScreen(QImage frame, Qt::ScreenOrientation) override
+    // The device paints the frame with its own refresh policy, so a clean transition adds nothing.
+    bool presentSleepScreen(QImage frame, Qt::ScreenOrientation, bool = false) override
     {
         if (frame.isNull())
             return false;

@@ -111,7 +111,7 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     qApp->installEventFilter(this);
     start = new standalone::StartScreen(readerServices(device).presentation, store, {}, stack);
     connect(start, &standalone::StartScreen::libraryExitRequested, this, &QWidget::close);
-    start->setDark(controller.preferences().value("dark_mode").toBool(false));
+    start->applyLibraryTheme(controller.preferences(), controller.fontSources());
     canvas = new standalone::WidgetCanvas(stack);
     canvas->setObjectName("kindleReaderCanvas");
     stack->addWidget(start);
@@ -284,7 +284,8 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     // The reader's dark mode setting, switched from the Library header. The
     // save runs on a worker; the next book opens with the saved value.
     libraryView->setDarkMode = [this, path = paths.preferences()](bool enabled) {
-        start->setDark(enabled);
+        // Keep the chosen palette; only the light or dark variant changes.
+        start->setDark(enabled, start->property("kobalt_palette").toString());
         QThreadPool::globalInstance()->start([path, enabled] {
             storage::updatePreferences(path, QJsonObject{ { "dark_mode", !enabled } },
                                        QJsonObject{ { "dark_mode", enabled } });
@@ -442,7 +443,7 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     });
     connect(&controller, &standalone::ReaderController::closed, this, [this] {
         recordProgress();
-        start->setDark(controller.preferences().value("dark_mode").toBool(false));
+        start->applyLibraryTheme(controller.preferences(), controller.fontSources());
         if (!failed)
             start->showLibrary();
         stack->setCurrentWidget(start);
