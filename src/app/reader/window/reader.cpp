@@ -546,7 +546,13 @@ void Reader::prepareSleepWallpapers()
         wanted.append(custom.sleep.wallpaper);
     if (offWants)
         wanted.append(custom.off.wallpaper);
-    const QSize screen = page ? page->size() : size();
+    // Decode for the largest of the page, the reader and the screen. A book that has
+    // just opened has not laid its page out yet, and a wallpaper decoded for that
+    // small page is drawn enlarged, and blurry, on the sleep screen. A bound above
+    // the picture's own size never enlarges it.
+    QSize screen = (page ? page->size() : size()).expandedTo(size());
+    if (const auto *display = QGuiApplication::primaryScreen())
+        screen = screen.expandedTo(display->size() * display->devicePixelRatio());
     const int side = qMax(screen.width(), screen.height());
     const QPointer<Reader> guard(this);
     session->sleepWallpapers(
@@ -559,8 +565,9 @@ void Reader::prepareSleepWallpapers()
                     guard->sleepWallpaper = images.value(0);
                 guard->sleepOffWallpaper =
                         offWants ? images.value(sleepWants ? 1 : 0) : guard->sleepWallpaper;
-                // Lets tests wait for the decode.
+                // Lets tests wait for the decode and check its size.
                 guard->setProperty("sleepWallpaperReady", !guard->sleepWallpaper.isNull());
+                guard->setProperty("sleepWallpaperSize", guard->sleepWallpaper.size());
                 guard->updateSleepWallpaperOption();
             });
 }

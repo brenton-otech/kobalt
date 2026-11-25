@@ -5591,6 +5591,45 @@ private slots:
                         .toBool());
     }
 
+    // A wallpaper decoded before the page has its size must still cover the screen. At
+    // a smaller size the sleep screen enlarges it, and the picture turns blurry.
+    void sleepWallpaperDecodesAtScreenSize()
+    {
+        const auto paths = testPaths();
+        const auto screen = QGuiApplication::primaryScreen()->size();
+        QTemporaryDir wallpapers;
+        QVERIFY(wallpapers.isValid());
+        QImage wallpaper(screen * 2, QImage::Format_RGB32);
+        wallpaper.fill(QColor(40, 90, 150));
+        QVERIFY(wallpaper.save(wallpapers.filePath("large.png")));
+        QJsonObject preferences;
+        sleep::Custom custom;
+        custom.sleep = { sleep::Mode::Wallpaper, sleep::Design::Bookmark, "large.png" };
+        sleep::setCustom(preferences, custom);
+        sleep::setDesign(preferences, sleep::Design::Custom);
+        QVERIFY(storage::writePreferences(paths.preferences(), preferences));
+        ReaderFixture host(paths, testFonts, testPlaceholder);
+        host.configureServices = [&](ReaderHostServices &services) {
+            services.sleepWallpaperDirectories = { wallpapers.path() };
+            services.presentation = [](QWidget *) {
+                return std::make_unique<test::HostPresentation>(
+                        std::make_shared<test::SleepPresentationState>());
+            };
+        };
+        CloseHost cleanup{ host };
+        QSignalSpy opened(&host, &ReaderFixture::opened);
+        host.open(textBook);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QTRY_VERIFY(host.window()->property("sleepWallpaperReady").toBool());
+        const auto decoded = host.window()->property("sleepWallpaperSize").toSize();
+        QVERIFY2(decoded.width() >= screen.width() && decoded.height() >= screen.height(),
+                 qPrintable(QString("Decoded %1x%2 for a %3x%4 screen")
+                                    .arg(decoded.width())
+                                    .arg(decoded.height())
+                                    .arg(screen.width())
+                                    .arg(screen.height())));
+    }
+
     void sleepRandomStatusUntilWake_data()
     {
         QTest::addColumn<bool>("privateBook");
