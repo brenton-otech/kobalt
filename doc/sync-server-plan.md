@@ -22,7 +22,7 @@ This is a design proposal for a self-hosted Kobalt server on one small VPS. With
 | OPDS catalog | Only the Kindle host connects it. It parses OPDS 1 Atom feeds, refuses DOCTYPE, sends HTTP Basic credentials only to the catalog's own scheme, host and port, and downloads one EPUB at a time. | `src/opds/feed.h` (`sameServer`), `src/opds/client.cpp`, [Kindle catalog](kindle-maintenance.md#catalog) |
 | OPDS account storage | `opds.json` keeps `url`, `username`, `password` and `folder`, with the password in plain text | `src/opds/browser.h`, [Kindle catalog](kindle-maintenance.md#catalog) |
 | OPDS download | The whole book is held in memory, up to 200 MB, before a worker thread writes it. A book is recognized by its `Author - Title.epub` file name, because a catalog gives no checksum. | `maxDownloadBytes` and `readAll` in `src/opds/client.cpp` |
-| Kindle TLS | The package ships its own `libssl.so.3`, `libcrypto.so.3` (OpenSSL 3.5.9) and Qt's OpenSSL TLS plugin. No CA bundle is packaged, so trust depends on what the firmware provides. | `platforms/kindle/package.cmake`, [PW3 SDK](pw3-sdk.md#build-contract) |
+| Kindle TLS | The package ships its own `libssl.so.3`, `libcrypto.so.3` (OpenSSL 3.5.9) and Qt's OpenSSL TLS plugin. No CA bundle is packaged, so trust depends on what the firmware provides. The owner's PW3 already signs in to an HTTPS KOSync server behind Caddy, so a certificate from that setup is trusted. | `platforms/kindle/package.cmake`, [PW3 SDK](pw3-sdk.md#build-contract) |
 | Saved-data rules | Formats have their own versions, optional fields keep the version, and damaged data is never overwritten | [Storage compatibility](storage.md#rules) |
 
 Two of these need attention regardless of the server:
@@ -190,11 +190,11 @@ What must be backed up:
 
 | Device | TLS library | Expected versions | Trust store | Status |
 | --- | --- | --- | --- | --- |
-| Kindle PW3, PW5, Colorsoft | Kobalt's own OpenSSL 3.5.9 with Qt's OpenSSL plugin | TLS 1.2 and 1.3 | Whatever certificate folders on the firmware Qt finds. Kobalt packages no CA bundle. | Not verified on a device. Whether firmware 5.13.5 trusts ISRG Root X1 is unknown. |
+| Kindle PW3, PW5, Colorsoft | Kobalt's own OpenSSL 3.5.9 with Qt's OpenSSL plugin | TLS 1.2 and 1.3 | Whatever certificate folders on the firmware Qt finds. Kobalt packages no CA bundle. | Works today on the PW3: it signs in over HTTPS to a KOSync server behind Caddy. A new host name on the same Caddy and certificate authority should behave the same. Not yet checked on the Colorsoft. |
 
 - Do not enable TLS 1.0 or 1.1 on the server for any device. If a Kindle cannot validate the server's certificate, the fix is on the device side, for example a CA bundle packaged with Kobalt, and never a weaker server.
-- Phase 0 must test every device type against a staging host with a real Let's Encrypt certificate. On Kindle, the existing `device_info` report already records the TLS backend and library version (`platforms/kindle/device_info.cpp`).
-- If the Kindle firmware lacks ISRG Root X1, the fix belongs in kobuild: ship a pinned CA bundle with the OpenSSL that kobuild already prepares, and point Qt at it. This follows the rule that TLS and SDK production belong to kobuild ([Kindle building](kindle-maintenance.md#building)). It is not an application-side workaround.
+- No separate TLS probe is needed for a host name behind the same Caddy. Open the new host name once from each Kindle with Kobalt's KOSync sign-in before relying on it. The existing `device_info` report records the TLS backend and library version (`platforms/kindle/device_info.cpp`).
+- If a Kindle ever fails certificate validation, for example because its firmware lacks ISRG Root X1, the fix belongs in kobuild: ship a pinned CA bundle with the OpenSSL that kobuild already prepares, and point Qt at it. This follows the rule that TLS and SDK production belong to kobuild ([Kindle building](kindle-maintenance.md#building)). It is not an application-side workaround.
 - A device with a wrong clock fails certificate checks. Kobalt's TLS error message already asks the user to check the device date ([KOSync validation](validation/kosync.md)).
 
 ### Hosting hygiene
@@ -714,7 +714,7 @@ Each phase ends with something usable.
 
 | Phase | Scope | Done means | Tests |
 | --- | --- | --- | --- |
-| 0. Groundwork | Server repository, CI, staging host with a real certificate. A TLS probe from the PW3 and the Colorsoft. Memory measurement. Answers to the open questions. | Each device type has either reached the staging host over HTTPS or has a recorded fix, such as a kobuild CA bundle | A device test log per device type; `testssl.sh` report for the staging host |
+| 0. Groundwork | Server repository, CI, staging host with a real certificate. One KOSync sign-in from each Kindle against the new host name. Memory measurement. Answers to the open questions. | Each Kindle has reached the staging host over HTTPS | A device test log per Kindle; `testssl.sh` report for the staging host |
 | 1. Accounts, books and OPDS | User command line, setup links, web sign-in, upload page, devices page, device secrets, OPDS feeds and downloads, backups | A user uploads a book on the web, a Kindle PW3 downloads it through Kobalt's existing Catalog with a device secret, and a restore drill passes | Upload validation fuzzing, cross-user tests, Basic auth tests, OPDS parsing by Kobalt's `model.opds-feed` parser against server output, restore drill |
 | 2. Positions | KOSync-compatible routes, native position API, position history | Kobalt on the Kindle devices and KOReader exchange positions through `/kosync` with device secrets, with no Kobalt change | KOSync conformance suite, Kobalt's `model.kosync` and `lifecycle.kosyncFinal` server rows against this server, version and 412 tests |
 | 3. Server account and settings in Kobalt | `server.json`, device enrollment and pairing, native positions in the client, settings sync with the key allowlist, Catalog using the server account | A setting changed on one device appears on another at its next sync, a device-local setting does not, and no password is stored on any device | New model tests for settings merge and conflict, storage compatibility tests for `server.json`, strict main-thread runs, Kobo syntax check, screen review of the new Sync page section |
@@ -752,8 +752,7 @@ Before opening the server to other users:
 
 | Risk | Effect | Mitigation |
 | --- | --- | --- |
-| Kindle firmware lacks a CA that Let's Encrypt chains to | Kindle cannot connect | Test in phase 0. Ship a CA bundle through kobuild if needed. |
-| A Kindle does not trust the server's certificate chain | Kobalt cannot connect at all | Test in phase 0 before any server code. Package a CA bundle with Kobalt, or serve a chain the firmware trusts. |
+| Kindle firmware lacks a CA that the certificate chains to | Kindle cannot connect | Unlikely, since the owner's PW3 already reaches an HTTPS KOSync server. Check the new host name once, and ship a CA bundle through kobuild if ever needed. |
 | Custom server code has a security bug | Data exposure | Small code base, cross-user tests, fuzzing, external scan, no rendering of user content |
 | The owner stops maintaining the server | Unpatched internet-facing service | A single binary with few dependencies. The data is plain SQLite and files, and books can always be downloaded. |
 | A one-person VPS fails at a bad time | Hours without sync | Devices keep working offline. Positions and settings are local first. |
@@ -765,6 +764,8 @@ Before opening the server to other users:
 
 - The server is public on the internet, with the hardening in this plan and the admin command line reachable only over SSH. A VPN-only server is not wanted. E-readers cannot run a VPN client, so it would limit syncing to home.
 - The devices are the owner's personal Kindles, a PW3 and a Colorsoft. Kobo is not a goal.
+- The owner already runs an OPDS catalog and a KOSync server, each on its own host name under one domain behind Caddy. The PW3 signs in to the KOSync server over HTTPS, so certificate trust is not a concern for a new host name behind the same Caddy.
+- The owner builds Kobalt KPM packages on their own Git host and installs them on the Kindles, so client changes ship through that build.
 - The Kindle client work may live in a separate fork named "kibalt", which is not decided. See the first open question below.
 
 ## Open questions for the owner
@@ -779,6 +780,7 @@ Before opening the server to other users:
 8. Which formats besides EPUB, if any? Each needs its own validation.
 9. Which domain and which off-site backup target? A second machine with restic's REST server, or an S3 bucket with object lock?
 10. Should the server code be open source, and under which license? This plan reuses no AGPL code, so the choice is open.
+11. Which software serves the catalog and the KOSync server today, and what do they already do well? If one of them is Calibre-Web or a similar project, the better plan may be to keep it for books and positions and add only the missing pieces, such as settings sync and one shared login.
 
 ## Effort estimate
 
@@ -799,7 +801,7 @@ These are rough. Device testing on the Kindles is usually where estimates slip.
 
 Start phase 0 with two small, independent tasks:
 
-1. Put a static test page behind Caddy with a real Let's Encrypt certificate on a staging host name. Point Kobalt's KOSync sign-in at it from the Kindle PW3 and the Colorsoft. Record whether each completes the TLS handshake. This answers the biggest unknown before any server code exists.
+1. List what already runs behind the owner's catalog and KOSync host names, and what each lacks for one login, settings sync and bulk download. This can change the choice between composing existing pieces and writing a custom server. See open question 11.
 2. Answer open questions 2 and 9. They decide disk size and the backup target.
 
 Then create the server repository with the skeleton, CI, `govulncheck`, the KOSync conformance suite and the shared MD5 test vectors, and begin phase 1.
@@ -837,7 +839,7 @@ All checked on 2026-11-25.
 
 Not verified, and to be checked before relying on them:
 
-- Which root certificates Kindle firmware 5.13.5 and the Colorsoft firmware provide, and which folders Qt's OpenSSL backend searches on those devices.
+- Whether the Colorsoft also validates the new host name. The PW3 already reaches an HTTPS KOSync server.
 - The real memory use of the proposed Go server, and argon2id timing on the chosen VPS.
 - The exact response bodies of the reference KOSync server for every route; copy them from its source when implementing.
 - Whether korrosync can disable registration, and how Calibre-Web Automated scopes KOSync credentials.
