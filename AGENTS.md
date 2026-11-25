@@ -33,6 +33,7 @@ Read only the doc relevant to your task:
 | UI review workflow | [doc/screen-review.md](doc/screen-review.md) |
 | Benchmarks and release evaluation | [doc/release-evaluation.md](doc/release-evaluation.md), [doc/device-benchmarks.md](doc/device-benchmarks.md) |
 | Writing and maintaining docs | [doc/documentation.md](doc/documentation.md) |
+| Self-hosted sync server proposal (not built) | [doc/sync-server-plan.md](doc/sync-server-plan.md) |
 
 ## Build ownership
 
